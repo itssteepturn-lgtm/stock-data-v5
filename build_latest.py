@@ -5,71 +5,96 @@ HIST_DIR = DATA_DIR / "history"
 DATA_DIR.mkdir(exist_ok=True)
 HIST_DIR.mkdir(exist_ok=True)
 
+# V5.10 V3稳定抓法回归版 - 腾讯为主，东财为辅，Session复用，不再被踢
+SESSION = requests.Session()
+SESSION.headers.update({
+    'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    'Referer':'https://gu.qq.com/',
+})
+
 def secid(code):
     code=str(code).zfill(6)
     return f'1.{code}' if code.startswith('6') else f'0.{code}'
 
 def fetch_codes():
-    # 更稳的接口，多试几次
-    urls=[
-        "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=6000&po=1&np=1&fltt=2&invt=2&fidf=1&fid0=mkt&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048&fields=f12",
-        "https://push2.eastmoney.com/api/qt/clist/get?pn=2&pz=6000&po=1&np=1&fltt=2&invt=2&fidf=1&fid0=mkt&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048&fields=f12",
-    ]
-    codes=[]
-    for url in urls:
-        try:
-            r=requests.get(url,timeout=20,headers={'User-Agent':'Mozilla/5.0','Referer':'https://eastmoney.com'}).json()
-            diff=r.get('data',{}).get('diff',[])
-            for d in diff:
-                c=str(d.get('f12','')).zfill(6)
-                if c and c!='000000':
-                    codes.append(c)
-            if len(codes)>=4000: break
-            time.sleep(0.5)
-        except Exception as e:
-            print(f"codes url fail {e}")
-    codes=list(dict.fromkeys(codes))
-    # 如果还是少，用已有codes.json补
-    if len(codes)<1000:
-        p=DATA_DIR/"codes.json"
-        if p.exists():
-            try:
-                old=json.loads(p.read_text())
-                codes=list(dict.fromkeys(codes+old))
-            except: pass
-    print(f"codes final {len(codes)}")
-    if len(codes)<100:
-        # 兜底核心50只，保证这次能跑通
-        return ["000001","399001","399006","600519","000858","300750","600000","000063","600036","601318"] + [f"{i:06d}" for i in range(1,51)]
-    return codes
+    # V3用的就是东财列表，这个不变，稳
+    url="https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=6000&po=1&np=1&fltt=2&invt=2&fidf=1&fid0=mkt&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048&fields=f12"
+    try:
+        r=SESSION.get(url,timeout=20).json()
+        codes=[str(d['f12']).zfill(6) for d in r['data']['diff']]
+        codes=list(dict.fromkeys(codes))
+        print(f"codes {len(codes)}")
+        if len(codes)>=3000: return codes
+    except Exception as e:
+        print(f"codes fail {e}")
+    # 兜底
+    p=DATA_DIR/"codes.json"
+    if p.exists():
+        try: return json.loads(p.read_text())
+        except: pass
+    return ["000001","600519","300750"]
 
-def fetch_kline_with_retry(code, retries=3):
+def fetch_kline_tencent(code):
+    # 腾讯日K，前复权，320天 - V3就是用的这个，最稳
+    prefix='sh' if str(code).startswith('6') else 'sz'
+    param=f"{prefix}{str(code).zfill(6)},day,,,360,qfq"
+    url=f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={param}"
+    try:
+        r=SESSION.get(url,timeout=15)
+        j=r.json()
+        key=f"{prefix}{str(code).zfill(6)}"
+        data=j.get('data',{}).get(key,{})
+        klines=data.get('qfqday') or data.get('day') or []
+        if len(klines)<60: return None
+        bars=[]
+        for k in klines:
+            # k: [date, open, close, high, low, vol]
+            try:
+                d=k[0]; o=float(k[1]); c=float(k[2]); h=float(k[3]); l=float(k[4]); v=float(k[5])*100 # 腾讯手转股
+                if c<=0: continue
+                bars.append({"d":d,"o":o,"c":c,"h":h,"l":l,"v":v,"a":0})
+            except: continue
+        if len(bars)<60: return None
+        # 去重按日期
+        # 腾讯返回是新到旧？是旧到新
+        return bars[-360:]
+    except Exception as e:
+        # print(f"tx {code} {e}")
+        return None
+
+def fetch_kline_eastmoney(code):
     sid=secid(code)
     url=f"https://push2his.eastmoney.com/api/qt/stock/kline/get?fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58&klt=101&fqt=1&secid={sid}&beg=0&end=20500101&lmt=360"
-    for attempt in range(retries):
-        try:
-            r=requests.get(url,timeout=15,headers={'User-Agent':'Mozilla/5.0','Referer':'https://eastmoney.com'})
-            j=r.json()
-            klines=j.get('data',{}).get('klines',[])
-            if len(klines)<60:
-                time.sleep(0.5+attempt*0.5)
-                continue
-            bars=[]; closes=set()
-            for line in klines:
-                p=line.split(',')
-                try:
-                    o=float(p[1]); c=float(p[2]); h=float(p[3]); l=float(p[4]); v=float(p[5])
-                    if c<=0: continue
-                    closes.add(c)
-                    bars.append({"d":p[0],"o":o,"c":c,"h":h,"l":l,"v":v,"a":float(p[6])})
-                except: continue
-            if len(bars)<60 or len(closes)<5:
-                time.sleep(0.5+attempt*0.5)
-                continue
+    try:
+        r=SESSION.get(url,timeout=15)
+        j=r.json()
+        klines=j.get('data',{}).get('klines',[])
+        if len(klines)<60: return None
+        bars=[]
+        for line in klines:
+            p=line.split(',')
+            try:
+                o=float(p[1]); c=float(p[2]); h=float(p[3]); l=float(p[4]); v=float(p[5])
+                if c<=0: continue
+                bars.append({"d":p[0],"o":o,"c":c,"h":h,"l":l,"v":v,"a":float(p[6])})
+            except: continue
+        if len(bars)<60: return None
+        return bars
+    except:
+        return None
+
+def fetch_kline_with_retry(code):
+    # 先腾讯，失败再东财，重试3次，V3就是这么稳的
+    for attempt in range(3):
+        bars=fetch_kline_tencent(code)
+        if bars and len(bars)>=60:
             return bars
-        except Exception as e:
-            print(f"k {code} attempt {attempt} err {e}")
-            time.sleep(1+attempt*1 + random.random())
+        time.sleep(0.3+attempt*0.3)
+        bars=fetch_kline_eastmoney(code)
+        if bars and len(bars)>=60:
+            return bars
+        time.sleep(0.5+attempt*0.5+random.random()*0.3)
+    print(f"k {code} FAIL after 3 attempts")
     return None
 
 def main():
@@ -84,56 +109,23 @@ def main():
     target=codes[s:e]
     print(f"SHARD {shard}/{total_shards} {s}-{e} total {len(codes)} target {len(target)}")
 
-    # 清理假数据：检测旧文件如果是随机假数据（c在10-11之间），删掉
-    cleaned=0
-    for f in HIST_DIR.glob("*.json"):
-        try:
-            j=json.loads(f.read_text())
-            arr=j.get('bars',j) if isinstance(j,dict) else j
-            if not arr: continue
-            # 假数据特征：c在10-11随机，v=1000
-            fake=0
-            for b in arr[:5]:
-                c=b.get('c',0) if isinstance(b,dict) else 0
-                v=b.get('v',0) if isinstance(b,dict) else 0
-                if 9.5<c<11.5 and abs(v-1000)<1:
-                    fake+=1
-            if fake>=3:
-                f.unlink()
-                cleaned+=1
-        except: pass
-    print(f"cleaned fake {cleaned}")
-
     ok=0; fail=0
     for i,c in enumerate(target):
-        # 如果已存在真数据且今天已更新，跳过（避免重复被限）
-        existing=HIST_DIR/f"{c}.json"
-        if existing.exists():
-            try:
-                j=json.loads(existing.read_text())
-                arr=j if isinstance(j,list) else j.get('bars',[])
-                if arr and len(arr)>=60:
-                    # 检查是否是今天之前的数据，如果是今天的不重复抓
-                    last_d=arr[-1].get('d','') if isinstance(arr[-1],dict) else ''
-                    if last_d and last_d>=datetime.date.today().isoformat():
-                        ok+=1
-                        continue
-            except: pass
-
         bars=fetch_kline_with_retry(c)
         if bars is None:
             fail+=1
-            if i%20==0: print(f"[{i}/{len(target)}] {c} FAIL")
         else:
             try:
                 (HIST_DIR/f"{c}.json").write_text(json.dumps(bars,ensure_ascii=False),encoding='utf-8')
                 ok+=1
-                if i%20==0: print(f"[{i}/{len(target)}] {c} OK {len(bars)} ok={ok} fail={fail}")
             except:
                 fail+=1
-        time.sleep(0.25)  # 250ms，慢一点，不被踢
+        # V3的关键：慢一点，1秒1只，不被踢
+        if i%20==0:
+            print(f"[{i}/{len(target)}] {c} ok={ok} fail={fail} saved={len(list(HIST_DIR.glob('*.json')))}")
+        time.sleep(0.8 + random.random()*0.4)  # 0.8-1.2秒，V3节奏
 
-    meta={"updated":datetime.datetime.now().isoformat(),"count":len(codes),"shard":f"{shard}/{total_shards}","range":f"{s}-{e}","ok":ok,"fail":fail,"saved_total":len(list(HIST_DIR.glob("*.json"))),"cleaned_fake":cleaned,"v":"V5.9 清理假数据+重试版","note":"已清理假数据，东财重试3次，间隔250ms，断档前端补齐；COST/ZQ/ZQ1全部参与今日"}
+    meta={"updated":datetime.datetime.now().isoformat(),"count":len(codes),"shard":f"{shard}/{total_shards}","range":f"{s}-{e}","ok":ok,"fail":fail,"saved_total":len(list(HIST_DIR.glob("*.json"))),"v":"V5.10 V3稳定回归版-腾讯主源","note":"腾讯ifzq为主，不限速，东财为辅；Session复用，0.8-1.2秒/只，V3同样节奏所以稳；COST/ZQ/ZQ1今日参与，断档前端补"}
     (DATA_DIR/"meta.json").write_text(json.dumps(meta,ensure_ascii=False,indent=2),encoding='utf-8')
     print(meta)
 
