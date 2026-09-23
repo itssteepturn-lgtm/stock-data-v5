@@ -2,12 +2,12 @@ name: V5自养数据
 
 on:
   schedule:
-    - cron: '0 22 * * *'  # 北京时间早6点
-    - cron: '0 10 * * *'  # 北京时间下午6点，一天两轮养齐
+    - cron: '0 22 * * *'
+    - cron: '0 10 * * *'
   workflow_dispatch:
     inputs:
       shard:
-        description: '分片 0=前半 2500只，1=后半 2500只，2=全量(超时可能失败)'
+        description: '分片 0=前半 1=后半 2=全量'
         required: true
         default: '0'
         type: choice
@@ -26,7 +26,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install requests
+      - name: Install deps
+        run: |
+          pip install baostock pandas requests
       - name: Build
         env:
           SHARD: ${{ inputs.shard || '0' }}
@@ -42,5 +44,5 @@ jobs:
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add data/
-          git diff --staged --quiet || git commit -m "V5.8 自养更新 shard ${{ inputs.shard || '0' }} $(date -u +%Y-%m-%d)"
+          git diff --staged --quiet || git commit -m "V5.11 baostock shard ${{ inputs.shard || '0' }} $(date -u +%Y-%m-%d)"
           git push
