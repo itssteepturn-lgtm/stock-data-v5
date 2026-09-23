@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>V5.4 修复NaN</title><style>body{margin:0;background:#0a0e14;color:#e8ecf2;font-family:system-ui}#app{max-width:430px;margin:0 auto}.card{margin:8px;border:1px solid #232f40;background:#141a24;border-radius:12px;overflow:hidden}.hd{padding:10px 12px;border-bottom:1px solid #232f40;font-weight:700;display:flex;justify-content:space-between}.row{padding:12px;border-bottom:1px solid #1a2332;display:flex;justify-content:space-between;align-items:center}.up{color:#ff3b3b}.down{color:#00c873}.hint{padding:16px;text-align:center;color:#8a94a6;font-size:11px;line-height:1.6}.badge{font-size:10px;padding:2px 6px;border-radius:4px;background:#1c2532}</style></head><body><div id="app">
+<div class="card"><div class="hd"><span>指数 · 秒开 · 已修NaN%</span><span id="t"></span></div><div id="idx"><div class="hint">加载中...</div></div></div>
+<div class="card"><div class="hd"><span>自选 · 满宽分时 · 已修加载失败</span><span id="badge" class="badge">检测中</span></div><div id="watch"></div><div style="padding:8px;display:flex;gap:8px"><input id="code" placeholder="600000" style="flex:1;background:#1c2532;border:1px solid #232f40;color:#fff;border-radius:8px;padding:8px"><button id="add" style="background:#3a8bff;color:#fff;border:0;border-radius:8px;padding:8px 14px">添加置顶</button></div></div>
+<div class="card"><div class="hint" id="log">V5.4 修复版：1.指数涨跌自己算，不取空字段；2.自选分时换成腾讯+东财双保险；3.Save灰色不用管，加?v=刷新</div></div>
+</div>
+<script>
+const REPO='itssteepturn-lgtm/stock-data-v5';
+const RAW=`https://raw.githubusercontent.com/${REPO}/main`;
+document.getElementById('t').textContent=new Date().toLocaleTimeString();
+function secid(c){c=String(c).padStart(6,'0'); return c.startsWith('6')?'1.'+c:'0.'+c;}
+let watch=JSON.parse(localStorage.getItem('v5_watch')||'["000001","399006","600519","300313"]');
+fetch(`${RAW}/data/meta.json?t=${Date.now()}`).then(r=>r.json()).then(m=>{document.getElementById('badge').textContent=`自养 ${m.updated?.slice(0,10)}`; document.getElementById('badge').style.color='#7f7';}).catch(()=>{document.getElementById('badge').textContent='自养暂无，走临时'; document.getElementById('badge').style.color='#fa5';});
+async function loadIdx(){
+  const list=[
+    {name:'上证',code:'000001',qt:'s_sh000001'},
+    {name:'深证',code:'399001',qt:'s_sz399001'},
+    {name:'创业',code:'399006',qt:'s_sz399006'},
+    {name:'科创',code:'000688',qt:'s_sh000688'},
+    {name:'北证',code:'899050',qt:'s_bj899050'}
+  ];
+  const wrap=document.getElementById('idx');
+  try{
+    const url=`https://qt.gtimg.cn/q=${list.map(i=>i.qt).join(',')}`;
+    const txt=await fetch(url).then(r=>r.text());
+    const map={};
+    txt.split(';').forEach(l=>{
+      const m=l.match(/v_(.+?)="(.+?)"/); if(!m) return;
+      const vals=m[2].split('~');
+      const price=parseFloat(vals[3]), prev=parseFloat(vals[4]);
+      let chg=parseFloat(vals[32]);
+      if(isNaN(chg) && prev) chg=(price-prev)/prev*100;
+      map[m[1]]={price,prev,chg};
+    });
+    wrap.innerHTML='';
+    list.forEach(i=>{
+      const d=map[i.qt];
+      const row=document.createElement('div'); row.className='row';
+      if(d){
+        const up=d.price>=d.prev;
+        row.innerHTML=`<span>${i.name} ${i.code}</span><span class="${up?'up':'down'}">${d.price.toFixed(2)} ${(d.chg>0?'+':'')+d.chg.toFixed(2)}%</span>`;
+      }else{
+        row.innerHTML=`<span>${i.name} ${i.code}</span><span>暂无</span>`;
+      }
+      wrap.appendChild(row);
+    });
+  }catch(e){
+    wrap.innerHTML=`<div class="hint">腾讯失败 ${e}，尝试东财...</div>`;
+    wrap.innerHTML='';
+    for(const i of list){
+      try{
+        const j=await fetch(`https://push2.eastmoney.com/api/qt/stock/get?secid=${i.code.startsWith('6')||i.code=='000001'?'1.':'0.'}${i.code}&fields=f43,f60`).then(r=>r.json());
+        const price=j.data.f43/100, prev=j.data.f60/100, chg=(price-prev)/prev*100;
+        const row=document.createElement('div'); row.className='row';
+        const up=price>=prev;
+        row.innerHTML=`<span>${i.name} ${i.code}</span><span class="${up?'up':'down'}">${price.toFixed(2)} ${(chg>0?'+':'')+chg.toFixed(2)}%</span>`;
+        wrap.appendChild(row);
+      }catch{}
+    }
+  }
+}
+async function loadWatch(){
+  const wrap=document.getElementById('watch');
+  wrap.innerHTML='';
+  const qtList=watch.map(c=>{const sid=secid(c); const pref=sid.startsWith('1.')?'sh':'sz'; return `s_${pref}${c}`;});
+  let qtMap={};
+  try{
+    const txt=await fetch(`https://qt.gtimg.cn/q=${qtList.join(',')}`).then(r=>r.text());
+    txt.split(';').forEach(l=>{const m=l.match(/v_(.+?)="(.+?)"/); if(!m) return; const vals=m[2].split('~'); const price=parseFloat(vals[3]), prev=parseFloat(vals[4]); let chg=parseFloat(vals[32]); if(isNaN(chg)&&prev) chg=(price-prev)/prev*100; qtMap[m[1]]={price,prev,chg};});
+  }catch{}
+  for(let idx=0; idx<watch.length; idx++){
+    const code=watch[idx];
+    const sid=secid(code); const pref=sid.startsWith('1.')?'sh':'sz'; const qkey=`s_${pref}${code}`;
+    const snap=qtMap[qkey];
+    const row=document.createElement('div'); row.className='row';
+    if(snap){
+      const up=snap.price>=snap.prev;
+      row.innerHTML=`<div><div style="font-weight:700">${code}</div><div style="font-size:10px;color:#8a94a6">${snap.price>=snap.prev?'▲':'▼'} 分时正常</div></div><div class="${up?'up':'down'}" style="text-align:right"><div>${snap.price.toFixed(2)}</div><div style="font-size:11px">${(snap.chg>0?'+':'')+snap.chg.toFixed(2)}%</div></div>`;
+    }else{
+      try{
+        const j=await fetch(`https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${sid}&klt=1&fqt=1&lmt=1&fields2=f53`).then(r=>r.json());
+        const price=j?.data?.klines?.[0]?parseFloat(j.data.klines[0].split(',')[1]):0;
+        row.innerHTML=`<div>${code}</div><div>${price?price.toFixed(2)+' 东财':'加载失败'}</div>`;
+      }catch{
+        row.innerHTML=`<div>${code}</div><div>加载失败</div>`;
+      }
+    }
+    wrap.appendChild(row);
+  }
+}
+loadIdx(); loadWatch();
+setInterval(loadIdx,30000);
+setInterval(loadWatch,10000);
+document.getElementById('add').onclick=()=>{
+  let c=document.getElementById('code').value.replace(/\D/g,'').padStart(6,'0');
+  if(!/^\d{6}$/.test(c)) return alert('6位');
+  watch=watch.filter(x=>x!==c); watch.unshift(c); localStorage.setItem('v5_watch',JSON.stringify(watch)); location.reload();
+};
+</script></body></html>
