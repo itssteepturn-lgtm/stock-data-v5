@@ -1,127 +1,249 @@
 <!DOCTYPE html>
-<html lang="zh"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>V5.5 定版</title><style>
+<html lang="zh"><head><style>
+@font-face {
+  font-family: "Optimistic";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("/fonts/OptimisticAI_VF_Optimized.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Optimistic Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/OptimisticMono_W_TextRegular.woff2") format("woff2");
+}
+:where(html) {
+  font-family: "Optimistic", system-ui, sans-serif;
+}
+:where(code, pre, kbd, samp) {
+  font-family: "Optimistic Mono", ui-monospace, monospace;
+}
+</style><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>V5.8 断档补齐版</title><style>
 body{margin:0;background:#0a0e14;color:#e8ecf2;font-family:system-ui}
-#app{max-width:430px;margin:0 auto}
+#app{max-width:430px;margin:0 auto;padding-bottom:80px}
 .card{margin:8px;border:1px solid #232f40;background:#141a24;border-radius:12px;overflow:hidden}
-.hd{padding:10px 12px;border-bottom:1px solid #232f40;font-weight:700;display:flex;justify-content:space-between;font-size:13px}
-.row{display:flex;justify-content:space-between;align-items:center;padding:12px 12px;border-bottom:1px solid #1a2332;min-height:52px}
-.row:last-child{border:0}
+.hd{padding:10px 12px;border-bottom:1px solid #232f40;font-weight:700;display:flex;justify-content:space-between;align-items:center;font-size:13px}
+.row{display:flex;justify-content:space-between;align-items:center;padding:11px 12px;border-bottom:1px solid #1a2332;min-height:52px}
+.badge{font-size:10px;padding:3px 8px;border-radius:99px;background:#1c2532;color:#8a94a6}
 .up{color:#ff3b3b}.down{color:#00c873}
-.hint{padding:14px;text-align:center;color:#8a94a6;font-size:11px;line-height:1.6}
-.badge{font-size:10px;padding:3px 7px;border-radius:99px;background:#1c2532;color:#8a94a6}
-input{flex:1;background:#1c2532;border:1px solid #232f40;color:#fff;border-radius:8px;padding:9px 10px;font-size:13px}
-.btn{padding:9px 14px;border-radius:8px;border:0;background:#3a8bff;color:#fff;font-weight:700;font-size:13px}
-#idx,#watch{transition:none}
-</style></head><body><div id="app">
-<div class="card"><div class="hd"><span>指数 · 秒开 · 定版</span><span id="t" style="font-size:11px;color:#8a94a6"></span></div><div id="idx"></div></div>
-<div class="card"><div class="hd"><span>自选 · 固定不晃</span><span id="badge" class="badge">检测中</span></div><div id="watch" style="min-height:150px"></div><div style="padding:8px;display:flex;gap:8px"><input id="code" placeholder="600000"><button id="add" class="btn">添加置顶</button></div></div>
-<div class="card"><div class="hint">V5.5 定版：指数涨跌额=现价-昨收，正确计算；自选固定高度原位更新不闪；Save灰色不用管，用 ?v=5 刷新</div></div>
+.hint{padding:12px;color:#8a94a6;font-size:11px;line-height:1.6;text-align:center}
+select{background:#1c2532;border:1px solid #232f40;color:#e8ecf2;border-radius:8px;padding:6px 8px;font-size:11px}
+canvas{width:100%;background:#0a0e14;border-radius:8px;display:block}
+.detail{position:fixed;inset:0;background:#0a0e14;z-index:99;display:none;overflow:auto}
+.detail.open{display:block}
+.kbox{padding:8px}
+</style></head><body>
+<div id="app">
+<div class="card"><div class="hd"><span>指数 · 秒开</span><div style="display:flex;gap:6px;align-items:center"><select id="srcSel"><option value="tencent">腾讯(快)</option><option value="eastmoney">东财</option><option value="auto">自动轮询</option></select><span id="t" style="font-size:11px;color:#8a94a6"></span></div></div><div id="idx"></div></div>
+<div class="card"><div class="hd"><span>自选 · 断档补齐 · COST/ZQ/ZQ1当日参与</span><span id="badge" class="badge">检测中</span></div><div id="watch"></div><div style="padding:8px;display:flex;gap:8px"><input id="code" placeholder="600000" style="flex:1;background:#1c2532;border:1px solid #232f40;color:#fff;border-radius:8px;padding:9px"><button id="add" style="background:#3a8bff;color:#fff;border:0;border-radius:8px;padding:9px 14px;font-weight:700">添加</button></div></div>
+<div class="card"><div class="hd"><span>捏合与断档逻辑</span></div><div class="hint" id="log" style="text-align:left;white-space:pre-wrap">加载中...</div></div>
 </div>
+<div class="detail" id="detail"><div style="padding:10px;display:flex;justify-content:space-between"><span id="dtitle" style="font-weight:700"></span><button onclick="document.getElementById('detail').classList.remove('open')" style="background:#232f40;color:#fff;border:0;border-radius:8px;padding:6px 10px">关闭</button></div>
+<div class="kbox"><canvas id="mainC" style="height:260px"></canvas><canvas id="subC" style="height:110px;margin-top:8px"></canvas><div id="dinfo" class="hint" style="text-align:left"></div></div></div>
 <script>
 const REPO='itssteepturn-lgtm/stock-data-v5';
 const RAW=`https://raw.githubusercontent.com/${REPO}/main`;
+let SRC=localStorage.getItem('v5_src')||'tencent';
+document.getElementById('srcSel').value=SRC;
+document.getElementById('srcSel').onchange=e=>{SRC=e.target.value; localStorage.setItem('v5_src',SRC); loadIdx(); loadWatch();};
 function secid(c){c=String(c).padStart(6,'0'); return c.startsWith('6')?'1.'+c:'0.'+c;}
 let watch=JSON.parse(localStorage.getItem('v5_watch')||'["000001","399006","600519","300313"]');
-let idxDom={}, watchDom={};
-function ensureIdxDom(){
-  const wrap=document.getElementById('idx');
-  if(Object.keys(idxDom).length) return;
-  const list=['000001','399001','399006','000688','899050'];
-  const names={'000001':'上证','399001':'深证','399006':'创业','000688':'科创','899050':'北证'};
-  wrap.innerHTML='';
-  list.forEach(code=>{
-    const row=document.createElement('div'); row.className='row'; row.id='idxrow_'+code;
-    row.innerHTML=`<span>${names[code]||code} ${code}</span><span id="idxp_${code}" style="font-weight:700">--</span>`;
-    wrap.appendChild(row); idxDom[code]=row;
+function ensureIdx(){
+  const w=document.getElementById('idx'); if(w.children.length) return;
+  ['000001','399001','399006','000688','899050'].forEach(code=>{
+    const r=document.createElement('div'); r.className='row'; r.id='ir_'+code; r.innerHTML=`<span>${code}</span><span id="ip_${code}">--</span>`; w.appendChild(r); r.onclick=()=>openDetail(code);
   });
 }
-function ensureWatchDom(){
-  const wrap=document.getElementById('watch');
-  if(Object.keys(watchDom).length===watch.length && wrap.children.length===watch.length) return false;
-  wrap.innerHTML='';
-  watchDom={};
+function ensureWatch(){
+  const w=document.getElementById('watch'); if(w.children.length===watch.length) return false;
+  w.innerHTML='';
   watch.forEach(code=>{
-    const row=document.createElement('div'); row.className='row'; row.id='wrow_'+code;
-    row.innerHTML=`<div><div style="font-weight:700">${code}</div><div id="wsub_${code}" style="font-size:10px;color:#8a94a6">加载中</div></div><div style="text-align:right"><div id="wp_${code}" style="font-weight:700">--</div><div id="wc_${code}" style="font-size:11px">--</div></div>`;
-    wrap.appendChild(row); watchDom[code]=row;
+    const r=document.createElement('div'); r.className='row'; r.id='wr_'+code;
+    r.innerHTML=`<div><div style="font-weight:700">${code}</div><div id="ws_${code}" style="font-size:10px;color:#8a94a6">--</div></div><div style="text-align:right"><div id="wp_${code}" style="font-weight:700">--</div><div id="wc_${code}" style="font-size:11px">--</div></div>`;
+    w.appendChild(r); r.onclick=()=>openDetail(code);
+  }); return true;
+}
+ensureIdx(); ensureWatch();
+
+async function fetchQt(codes){
+  const qlist=codes.map(c=>{const s=secid(c); return `s_${s.startsWith('1.')?'sh':'sz'}${c}`;});
+  const txt=await fetch(`https://qt.gtimg.cn/q=${qlist.join(',')}`).then(r=>r.text());
+  const map={};
+  txt.split(';').forEach(l=>{
+    const m=l.match(/v_(.+?)="(.+?)"/); if(!m) return;
+    const vs=m[2].split('~'); const price=parseFloat(vs[3]), change=parseFloat(vs[4]), prev=price-change;
+    let pct=parseFloat(vs[5]); if(vs[5] && vs[5].includes('%')) pct=parseFloat(vs[5]); else if(prev) pct=(price-prev)/prev*100;
+    const open=parseFloat(vs[5]||''), high=parseFloat(vs[33]), low=parseFloat(vs[34]), vol=parseFloat(vs[6]);
+    if(!isNaN(price)) map[m[1]]={price,prev,change,pct,open,high,low,vol,key:m[1]};
   });
-  return true;
+  return {map};
 }
-ensureIdxDom(); ensureWatchDom();
-document.getElementById('t').textContent=new Date().toLocaleTimeString();
-fetch(`${RAW}/data/meta.json?t=${Date.now()}`).then(r=>r.json()).then(m=>{document.getElementById('badge').textContent=`自养 ${m.updated?.slice(0,10)}`;}).catch(()=>{document.getElementById('badge').textContent='临时数据源';});
-
+async function fetchEast(codes){
+  const map={};
+  for(const code of codes){
+    try{
+      const sid=secid(code);
+      const j=await fetch(`https://push2.eastmoney.com/api/qt/stock/get?secid=${sid}&fields=f43,f44,f45,f46,f57,f60`).then(r=>r.json());
+      const d=j.data; const price=d.f43/100, prev=d.f60/100, open=d.f46/100, high=d.f44/100, low=d.f45/100, vol=d.f57;
+      const pct=(price-prev)/prev*100;
+      map[`s_${sid.startsWith('1.')?'sh':'sz'}${code}`]={price,prev,change:price-prev,pct,open,high,low,vol};
+    }catch{}
+  }
+  return {map};
+}
+async function getTemp(codes){
+  const sources={tencent:fetchQt, eastmoney:fetchEast};
+  if(SRC==='auto'){
+    for(const k of ['tencent','eastmoney']){
+      try{ const r=await sources[k](codes); if(Object.keys(r.map).length) return r.map; }catch{}
+    }
+    return {};
+  }else{
+    try{ const r=await sources[SRC](codes); return r.map; }catch{ return {}; }
+  }
+}
 async function loadIdx(){
-  const list=[
-    {code:'000001',qt:'s_sh000001',name:'上证'},
-    {code:'399001',qt:'s_sz399001',name:'深证'},
-    {code:'399006',qt:'s_sz399006',name:'创业'},
-    {code:'000688',qt:'s_sh000688',name:'科创'},
-    {code:'899050',qt:'s_bj899050',name:'北证'}
-  ];
-  try{
-    const url=`https://qt.gtimg.cn/q=${list.map(i=>i.qt).join(',')}`;
-    const txt=await fetch(url).then(r=>r.text());
-    const map={};
-    txt.split(';').forEach(l=>{
-      const m=l.match(/v_(.+?)="(.+?)"/); if(!m) return;
-      const vs=m[2].split('~');
-      // 正确解析： vs[3]=现价, vs[4]=涨跌额, vs[5]=涨跌幅字符串如 "0.39%"
-      const price=parseFloat(vs[3]);
-      const change=parseFloat(vs[4]);
-      const prev=price-change;
-      let pct=parseFloat(vs[5]); // "0.39%" -> 0.39
-      if(isNaN(pct) && prev) pct=(price-prev)/prev*100;
-      if(!isNaN(price)) map[m[1]]={price,prev,change,pct};
-    });
-    list.forEach(i=>{
-      const d=map[i.qt];
-      const el=document.getElementById('idxp_'+i.code);
-      if(d && el){
-        const up=d.change>=0;
-        el.textContent=`${d.price.toFixed(2)} ${(d.pct>0?'+':'')+d.pct.toFixed(2)}%`;
-        el.className=up?'up':'down';
-      }
-    });
-  }catch(e){console.log(e);}
+  const codes=['000001','399001','399006','000688','899050'];
+  const map=await getTemp(codes);
+  codes.forEach(code=>{
+    const key=`s_${secid(code).startsWith('1.')?'sh':'sz'}${code}`;
+    const d=map[key];
+    const el=document.getElementById('ip_'+code);
+    if(d&&el){ const up=d.change>=0; el.textContent=`${d.price.toFixed(2)} ${(d.pct>0?'+':'')+d.pct.toFixed(2)}%`; el.className=up?'up':'down'; }
+  });
+}
+async function loadWatch(){
+  if(ensureWatch()) return;
+  const map=await getTemp(watch);
+  watch.forEach(code=>{
+    const key=`s_${secid(code).startsWith('1.')?'sh':'sz'}${code}`;
+    const d=map[key];
+    const pEl=document.getElementById('wp_'+code), cEl=document.getElementById('wc_'+code), sEl=document.getElementById('ws_'+code);
+    if(d&&pEl){ const up=d.change>=0; pEl.textContent=d.price.toFixed(2); pEl.className=up?'up':'down'; if(cEl){cEl.textContent=(d.pct>0?'+':'')+d.pct.toFixed(2)+'%'; cEl.className=up?'up':'down';} if(sEl) sEl.textContent=`${SRC} · 捏合就绪`; }
+  });
 }
 
-async function loadWatch(){
-  // 不重建DOM，只更新文字，防止晃
-  if(ensureWatchDom()) return;
-  const qlist=watch.map(c=>{const sid=secid(c); return `s_${sid.startsWith('1.')?'sh':'sz'}${c}`;});
+// === 核心：自养 + 断档补齐 + 今日捏合 ===
+async function getHistRaw(code){
   try{
-    const txt=await fetch(`https://qt.gtimg.cn/q=${qlist.join(',')}`).then(r=>r.text());
-    const map={};
-    txt.split(';').forEach(l=>{
-      const m=l.match(/v_(.+?)="(.+?)"/); if(!m) return;
-      const vs=m[2].split('~');
-      const price=parseFloat(vs[3]); const change=parseFloat(vs[4]); const prev=price-change;
-      let pct=parseFloat(vs[5]); if(isNaN(pct)&&prev) pct=(price-prev)/prev*100;
-      map[m[1]]={price,prev,change,pct};
-    });
-    watch.forEach(code=>{
-      const sid=secid(code); const qkey=`s_${sid.startsWith('1.')?'sh':'sz'}${code}`;
-      const d=map[qkey];
-      const pEl=document.getElementById('wp_'+code);
-      const cEl=document.getElementById('wc_'+code);
-      const sEl=document.getElementById('wsub_'+code);
-      if(d && pEl){
-        const up=d.change>=0;
-        pEl.textContent=d.price.toFixed(2); pEl.className=up?'up':'down';
-        if(cEl){cEl.textContent=(d.pct>0?'+':'')+d.pct.toFixed(2)+'%'; cEl.className=up?'up':'down';}
-        if(sEl) sEl.textContent='分时正常';
-      }
-    });
-  }catch(e){console.log('watch err',e);}
+    const j=await fetch(`${RAW}/data/history/${String(code).padStart(6,'0')}.json?t=${Date.now()}`).then(r=>r.json());
+    const arr=j.bars||j;
+    return arr.map(b=>({d:b.d||b.date, o:+b.o||+b.open, c:+b.c||+b.close, h:+b.h||+b.high, l:+b.l||+b.low, v:+b.v||+b.vol}));
+  }catch{ return null; }
+}
+async function getGapFill(fromDate, toDate, code){
+  // 用东财补 fromDate+1 到 toDate
+  try{
+    const sid=secid(code);
+    const url=`https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${sid}&klt=101&fqt=1&beg=${fromDate.replace(/-/g,'')}&end=${toDate.replace(/-/g,'')}&lmt=20&fields2=f51,f52,f53,f54,f55,f56`;
+    const j=await fetch(url).then(r=>r.json());
+    return (j.data.klines||[]).map(s=>{const a=s.split(','); return {d:a[0], o:+a[1], c:+a[2], h:+a[3], l:+a[4], v:+a[5]};});
+  }catch{ return []; }
+}
+async function getToday(code){
+  const map=await getTemp([code]);
+  const key=`s_${secid(code).startsWith('1.')?'sh':'sz'}${code}`;
+  return map[key]||null;
+}
+function dateStr(d){ return d.toISOString().slice(0,10); }
+
+async function getFullBars(code){
+  const hist=await getHistRaw(code);
+  const today=await getToday(code);
+  let bars=[];
+  let note=[];
+  if(hist && hist.length){
+    bars=[...hist];
+    const lastDate=hist[hist.length-1].d;
+    const last = new Date(lastDate);
+    const yesterday = new Date(); yesterday.setDate(yesterday.getDate()-1);
+    // 如果自养最后日期是5天前，补齐到昨日
+    if(last < yesterday){
+      const gap=await getGapFill(lastDate, dateStr(yesterday), code);
+      if(gap.length){ bars.push(...gap); note.push(`自养到${lastDate}，断档${gap.length}天已用东财补齐到${gap[gap.length-1].d}`); }
+      else note.push(`自养到${lastDate}，无断档`);
+    }else{
+      note.push(`自养到${lastDate}，最新`);
+    }
+  }else{
+    // 无自养，直接用东财90天
+    try{
+      const sid=secid(code);
+      const j=await fetch(`https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${sid}&klt=101&fqt=1&lmt=89&fields2=f51,f52,f53,f54,f55,f56`).then(r=>r.json());
+      bars=(j.data.klines||[]).map(s=>{const a=s.split(','); return {d:a[0], o:+a[1], c:+a[2], h:+a[3], l:+a[4], v:+a[5]};});
+      note.push('无自养，临时用东财89根补');
+    }catch{}
+  }
+  // 捏合今日
+  if(today){
+    const todayBar={d:'今日实时', o:today.open||today.price, h:today.high||today.price, l:today.low||today.price, c:today.price, v:today.vol||0};
+    bars.push(todayBar);
+    note.push('今日1根实时已捏合，COST/ZQ/ZQ1全部参与今日计算，陡升当日可见');
+  }
+  if(bars.length>90) bars=bars.slice(-90);
+  return {bars, note:note.join('；')};
+}
+
+function computeIndicators(bars){
+  const n=bars.length;
+  const cost50=new Array(n).fill(0), cost75=new Array(n).fill(0), cost90=new Array(n).fill(0);
+  const zq=new Array(n).fill(0), zq1=new Array(n).fill(0), vwma=new Array(n).fill(0);
+  for(let i=0;i<n;i++){
+    let sumCV=0,sumV=0; for(let k=Math.max(0,i-9);k<=i;k++){sumCV+=bars[k].c*bars[k].v; sumV+=bars[k].v;} vwma[i]=sumV?sumCV/sumV:bars[i].c;
+    const start=Math.max(0,i-89); const slice=bars.slice(start,i+1); const totalVol=slice.reduce((s,b)=>s+b.v,0)||1;
+    function winner(price){ let win=0; for(let b of slice) if(b.c<=price) win+=b.v; return win/totalVol*100; }
+    zq[i]=winner(bars[i].c); zq1[i]=winner(vwma[i]);
+    function costN(pct){ const sorted=[...slice].sort((a,b)=>a.c-b.c); let cum=0; for(let b of sorted){ cum+=b.v; if(cum/totalVol*100>=pct) return b.c; } return sorted[sorted.length-1]?.c||bars[i].c; }
+    cost50[i]=costN(50); cost75[i]=costN(75); cost90[i]=costN(90);
+  }
+  return {cost50,cost75,cost90,zq,zq1,vwma};
+}
+function setup(c){ const dpr=window.devicePixelRatio||1; const w=c.clientWidth, h=c.clientHeight; c.width=w*dpr; c.height=h*dpr; const ctx=c.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0); return {ctx,w,h}; }
+async function openDetail(code){
+  document.getElementById('detail').classList.add('open');
+  document.getElementById('dtitle').textContent=code+' · 断档补齐+今日捏合';
+  document.getElementById('dinfo').textContent='加载...';
+  const {bars, note}=await getFullBars(code);
+  if(!bars.length){ document.getElementById('dinfo').textContent='无数据'; return; }
+  const inds=computeIndicators(bars);
+  const last=bars[bars.length-1];
+  const hasToday=bars[bars.length-1].d==='今日实时';
+  document.getElementById('dinfo').innerHTML=`
+    <div>${note}</div>
+    <div>共${bars.length}根，最新 ${last.c.toFixed(2)} ${hasToday?'(今日实时已参与)':''}</div>
+    <div>COST50 ${inds.cost50[inds.cost50.length-1].toFixed(2)} COST75 ${inds.cost75[inds.cost75.length-1].toFixed(2)} COST90 ${inds.cost90[inds.cost90.length-1].toFixed(2)} <span style="color:#ff3b3b">←已含今日，陡升当日可见</span></div>
+    <div>ZQ ${inds.zq[inds.zq.length-1].toFixed(1)} ZQ1 ${inds.zq1[inds.zq1.length-1].toFixed(1)} <span style="color:#ffcc00">←已含今日，陡升当日可见，但本身很稳不晃</span></div>
+  `;
+  const mainC=document.getElementById('mainC'), subC=document.getElementById('subC');
+  const {ctx,w,h}=setup(mainC); const {ctx:ctx2,w:w2,h:h2}=setup(subC);
+  ctx.clearRect(0,0,w,h); ctx2.clearRect(0,0,w2,h2);
+  const min=Math.min(...bars.map(b=>b.l)), max=Math.max(...bars.map(b=>b.h)); const y=v=>h-10-(v-min)/(max-min||1)*(h-20);
+  bars.forEach((b,i)=>{
+    const x=i/(bars.length-1||1)*w; const up=b.c>=b.o; ctx.fillStyle=up?'#ff3b3b':'#00c873';
+    ctx.fillRect(x-3, y(Math.max(b.o,b.c)), 6, Math.abs(y(b.o)-y(b.c))||2);
+    ctx.fillRect(x-0.5, y(b.h), 1, y(b.l)-y(b.h));
+    if(i===bars.length-1 && hasToday){ ctx.strokeStyle='#ff3b3b'; ctx.setLineDash([3,3]); ctx.strokeRect(x-6, y(b.h)-6, 12, y(b.l)-y(b.h)+12); ctx.setLineDash([]); }
+  });
+  ctx.beginPath(); inds.cost50.forEach((v,i)=>{const x=i/(bars.length-1||1)*w; if(i===0) ctx.moveTo(x,y(v)); else ctx.lineTo(x,y(v));}); ctx.strokeStyle='#00ff88'; ctx.stroke();
+  ctx.beginPath(); inds.cost75.forEach((v,i)=>{const x=i/(bars.length-1||1)*w; if(i===0) ctx.moveTo(x,y(v)); else ctx.lineTo(x,y(v));}); ctx.strokeStyle='#ffcc00'; ctx.stroke();
+  ctx.beginPath(); inds.cost90.forEach((v,i)=>{const x=i/(bars.length-1||1)*w; if(i===0) ctx.moveTo(x,y(v)); else ctx.lineTo(x,y(v));}); ctx.strokeStyle='#ff3b3b'; ctx.stroke();
+  const zy=v=>h2-10-v/100*(h2-20);
+  ctx2.beginPath(); inds.zq.forEach((v,i)=>{const x=i/(bars.length-1||1)*w2; if(i===0) ctx2.moveTo(x,zy(v)); else ctx2.lineTo(x,zy(v));}); ctx2.strokeStyle='#ffcc00'; ctx2.stroke();
+  ctx2.beginPath(); inds.zq1.forEach((v,i)=>{const x=i/(bars.length-1||1)*w2; if(i===0) ctx2.moveTo(x,zy(v)); else ctx2.lineTo(x,zy(v));}); ctx2.strokeStyle='#fff'; ctx2.stroke();
 }
 
 loadIdx(); loadWatch();
-setInterval(()=>{document.getElementById('t').textContent=new Date().toLocaleTimeString(); loadIdx();}, 30000);
-setInterval(loadWatch, 8000); // 自选8秒刷新，不清空DOM，不晃
+setInterval(loadIdx,30000);
+setInterval(loadWatch,8000);
 document.getElementById('add').onclick=()=>{
   let c=document.getElementById('code').value.replace(/\D/g,'').padStart(6,'0');
-  if(!/^\d{6}$/.test(c)) return alert('6位代码');
-  watch=watch.filter(x=>x!==c); watch.unshift(c); localStorage.setItem('v5_watch',JSON.stringify(watch)); ensureWatchDom(); loadWatch(); document.getElementById('code').value='';
+  if(!/^\d{6}$/.test(c)) return alert('6位');
+  watch=watch.filter(x=>x!==c); watch.unshift(c); localStorage.setItem('v5_watch',JSON.stringify(watch)); ensureWatch(); loadWatch(); document.getElementById('code').value='';
 };
-</script></body></html>
+fetch(`${RAW}/data/meta.json?t=${Date.now()}`).then(r=>r.json()).then(m=>{
+  document.getElementById('badge').textContent=`自养 ${m.updated?.slice(0,10)} ${m.saved_total||''}只`;
+  document.getElementById('log').textContent=`V5.8 断档补齐+捏合版：\n1. 自养到昨日为底\n2. 若自养是5天前，自动用东财补齐中间4天，不会断档\n3. 再加今日实时1根，共89+断档补齐+今日，合并算COST/ZQ/ZQ1\n4. 所以COST/ZQ/ZQ1陡升全部当日可见，ZQ本身算法稳不晃\n5. 临时源可选 腾讯/东财/自动轮询`;
+}).catch(()=>{document.getElementById('log').textContent='V5.8：自养到昨日 + 断档自动用东财补齐 + 今日实时捏合，COST/ZQ/ZQ1全部参与今日，陡升当日可见，无断档';});
+</script><script>(function(){var loc=location.href.replace(/#.*$/,"");var ATTR_NAMES=["data-product-id","data-productid","data-product_id","product-id","productid","product_id","data-source-entity-id","source-entity-id","source_entity_id","data-product","data-metadata","data-meta"];var DATASET_KEYS=["productId","productid","product_id","sourceEntityId","sourceentityid","source_entity_id","product","metadata","meta"];function readProductId(value){if(typeof value!=="string"||value.length===0)return null;if(/^[0-9]{6,}$/.test(value))return value;var match=value.match(/(?:product(?:_|-)?id|source(?:_|-)?entity(?:_|-)?id)["'=:\s]+([0-9]{6,})/i);return match?match[1]:null}function extractProductId(start){for(var node=start;node&&node!==document.body;node=node.parentElement){for(var i=0;i<ATTR_NAMES.length;i++){var attrValue=node.getAttribute&&node.getAttribute(ATTR_NAMES[i]);var attrProductId=readProductId(attrValue);if(attrProductId)return attrProductId}var dataset=node.dataset||null;if(dataset){for(var j=0;j<DATASET_KEYS.length;j++){var dataValue=dataset[DATASET_KEYS[j]];var dataProductId=readProductId(dataValue);if(dataProductId)return dataProductId}}}return null}function isInlineMediaSlotElement(node){return !!(node&&node.getAttribute&&node.getAttribute("data-clippy-inline-media-slot")!==null)}function findInlineMediaSlot(start){for(var node=start;node&&node!==document.body;node=node.parentElement){if(isInlineMediaSlotElement(node))return node}return null}function readInlineMediaUrl(node){if(!node)return null;return node.getAttribute&&((node.getAttribute("data-clippy-inline-media-url")||node.getAttribute("data-url")||node.getAttribute("data_url")))||node.href||null}function stripHash(url){return String(url).replace(/#.*$/,"")}function urlsMatch(a,b){if(!a||!b)return false;try{return stripHash(new URL(a,loc).href)===stripHash(new URL(b,loc).href)}catch(_){return stripHash(a)===stripHash(b)}}function isFirstPartyReelUrl(value){try{var url=new URL(value,loc);if(url.protocol!=="https:")return false;var host=url.hostname.toLowerCase();var supported=host==="instagram.com"||host.endsWith(".instagram.com")||host==="facebook.com"||host.endsWith(".facebook.com");return supported&&/\/reels?\//i.test(url.pathname)}catch(_){return false}}function isInlineMediaUrlClick(node,href){var slot=findInlineMediaSlot(node);if(!slot)return false;var slotUrl=readInlineMediaUrl(slot);if(slotUrl)return urlsMatch(href,slotUrl);return isFirstPartyReelUrl(href)}function findDataHref(start){for(var node=start;node&&node!==document.body;node=node.parentElement){if(node.getAttribute){var href=node.getAttribute("data-href")||node.getAttribute("data-url");if(href)return{href:href,node:node}}}return null}var nativeOpen=window.open;window.open=function(url){if(parent!==window&&typeof url==="string"&&/^https?:\/\//.test(url)){parent.postMessage({type:"ecto:usercontent-link-click",href:url},"*");return null}return nativeOpen?nativeOpen.apply(window,arguments):null};document.addEventListener("click",function(e){var target=e.target instanceof Element?e.target:null;if(!target)return;if(parent===window)return;var a=target.closest?target.closest("a[href]"):null;if(a&&a.href&&/^https?:\/\//.test(a.href)&&a.href.replace(/#.*$/,"")!==loc){if(isInlineMediaUrlClick(a,a.href))return;var productId=extractProductId(target)||extractProductId(a);if(productId){e.preventDefault();parent.postMessage({type:"ecto-artifact-link-click",productId:productId},"*");return}e.preventDefault();parent.postMessage({type:"ecto:usercontent-link-click",href:a.href},"*");return}var dataHref=findDataHref(target);if(dataHref&&/^https?:\/\//.test(dataHref.href)&&dataHref.href.replace(/#.*$/,"")!==loc){if(isInlineMediaUrlClick(dataHref.node,dataHref.href))return;e.preventDefault();parent.postMessage({type:"ecto:usercontent-link-click",href:dataHref.href},"*")}},true)})();</script><script>(function(){var FOCUS_TYPE="ecto:artifact-focus-request";var CLOSE_TYPE="ecto:artifact-close-request";function focusArtifactDocument(){var body=document.body;if(!body)return;try{window.focus();}catch(e){}if(!body.hasAttribute("tabindex"))body.setAttribute("tabindex","-1");try{body.focus({preventScroll:true});}catch(e){try{body.focus();}catch(e2){}}}window.addEventListener("message",function(event){if(event.source!==window.parent)return;var data=event.data;if(!data||typeof data!=="object"||data.type!==FOCUS_TYPE)return;if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",focusArtifactDocument,{once:true});return;}focusArtifactDocument();});window.addEventListener("keydown",function(event){if(event.key!=="Escape")return;window.setTimeout(function(){if(event.defaultPrevented)return;window.parent.postMessage({type:CLOSE_TYPE},"*");},0);});})();</script></body></html>
