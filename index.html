@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>V5.5 定版</title><style>
+body{margin:0;background:#0a0e14;color:#e8ecf2;font-family:system-ui}
+#app{max-width:430px;margin:0 auto}
+.card{margin:8px;border:1px solid #232f40;background:#141a24;border-radius:12px;overflow:hidden}
+.hd{padding:10px 12px;border-bottom:1px solid #232f40;font-weight:700;display:flex;justify-content:space-between;font-size:13px}
+.row{display:flex;justify-content:space-between;align-items:center;padding:12px 12px;border-bottom:1px solid #1a2332;min-height:52px}
+.row:last-child{border:0}
+.up{color:#ff3b3b}.down{color:#00c873}
+.hint{padding:14px;text-align:center;color:#8a94a6;font-size:11px;line-height:1.6}
+.badge{font-size:10px;padding:3px 7px;border-radius:99px;background:#1c2532;color:#8a94a6}
+input{flex:1;background:#1c2532;border:1px solid #232f40;color:#fff;border-radius:8px;padding:9px 10px;font-size:13px}
+.btn{padding:9px 14px;border-radius:8px;border:0;background:#3a8bff;color:#fff;font-weight:700;font-size:13px}
+#idx,#watch{transition:none}
+</style></head><body><div id="app">
+<div class="card"><div class="hd"><span>指数 · 秒开 · 定版</span><span id="t" style="font-size:11px;color:#8a94a6"></span></div><div id="idx"></div></div>
+<div class="card"><div class="hd"><span>自选 · 固定不晃</span><span id="badge" class="badge">检测中</span></div><div id="watch" style="min-height:150px"></div><div style="padding:8px;display:flex;gap:8px"><input id="code" placeholder="600000"><button id="add" class="btn">添加置顶</button></div></div>
+<div class="card"><div class="hint">V5.5 定版：指数涨跌额=现价-昨收，正确计算；自选固定高度原位更新不闪；Save灰色不用管，用 ?v=5 刷新</div></div>
+</div>
+<script>
+const REPO='itssteepturn-lgtm/stock-data-v5';
+const RAW=`https://raw.githubusercontent.com/${REPO}/main`;
+function secid(c){c=String(c).padStart(6,'0'); return c.startsWith('6')?'1.'+c:'0.'+c;}
+let watch=JSON.parse(localStorage.getItem('v5_watch')||'["000001","399006","600519","300313"]');
+let idxDom={}, watchDom={};
+function ensureIdxDom(){
+  const wrap=document.getElementById('idx');
+  if(Object.keys(idxDom).length) return;
+  const list=['000001','399001','399006','000688','899050'];
+  const names={'000001':'上证','399001':'深证','399006':'创业','000688':'科创','899050':'北证'};
+  wrap.innerHTML='';
+  list.forEach(code=>{
+    const row=document.createElement('div'); row.className='row'; row.id='idxrow_'+code;
+    row.innerHTML=`<span>${names[code]||code} ${code}</span><span id="idxp_${code}" style="font-weight:700">--</span>`;
+    wrap.appendChild(row); idxDom[code]=row;
+  });
+}
+function ensureWatchDom(){
+  const wrap=document.getElementById('watch');
+  if(Object.keys(watchDom).length===watch.length && wrap.children.length===watch.length) return false;
+  wrap.innerHTML='';
+  watchDom={};
+  watch.forEach(code=>{
+    const row=document.createElement('div'); row.className='row'; row.id='wrow_'+code;
+    row.innerHTML=`<div><div style="font-weight:700">${code}</div><div id="wsub_${code}" style="font-size:10px;color:#8a94a6">加载中</div></div><div style="text-align:right"><div id="wp_${code}" style="font-weight:700">--</div><div id="wc_${code}" style="font-size:11px">--</div></div>`;
+    wrap.appendChild(row); watchDom[code]=row;
+  });
+  return true;
+}
+ensureIdxDom(); ensureWatchDom();
+document.getElementById('t').textContent=new Date().toLocaleTimeString();
+fetch(`${RAW}/data/meta.json?t=${Date.now()}`).then(r=>r.json()).then(m=>{document.getElementById('badge').textContent=`自养 ${m.updated?.slice(0,10)}`;}).catch(()=>{document.getElementById('badge').textContent='临时数据源';});
+
+async function loadIdx(){
+  const list=[
+    {code:'000001',qt:'s_sh000001',name:'上证'},
+    {code:'399001',qt:'s_sz399001',name:'深证'},
+    {code:'399006',qt:'s_sz399006',name:'创业'},
+    {code:'000688',qt:'s_sh000688',name:'科创'},
+    {code:'899050',qt:'s_bj899050',name:'北证'}
+  ];
+  try{
+    const url=`https://qt.gtimg.cn/q=${list.map(i=>i.qt).join(',')}`;
+    const txt=await fetch(url).then(r=>r.text());
+    const map={};
+    txt.split(';').forEach(l=>{
+      const m=l.match(/v_(.+?)="(.+?)"/); if(!m) return;
+      const vs=m[2].split('~');
+      // 正确解析： vs[3]=现价, vs[4]=涨跌额, vs[5]=涨跌幅字符串如 "0.39%"
+      const price=parseFloat(vs[3]);
+      const change=parseFloat(vs[4]);
+      const prev=price-change;
+      let pct=parseFloat(vs[5]); // "0.39%" -> 0.39
+      if(isNaN(pct) && prev) pct=(price-prev)/prev*100;
+      if(!isNaN(price)) map[m[1]]={price,prev,change,pct};
+    });
+    list.forEach(i=>{
+      const d=map[i.qt];
+      const el=document.getElementById('idxp_'+i.code);
+      if(d && el){
+        const up=d.change>=0;
+        el.textContent=`${d.price.toFixed(2)} ${(d.pct>0?'+':'')+d.pct.toFixed(2)}%`;
+        el.className=up?'up':'down';
+      }
+    });
+  }catch(e){console.log(e);}
+}
+
+async function loadWatch(){
+  // 不重建DOM，只更新文字，防止晃
+  if(ensureWatchDom()) return;
+  const qlist=watch.map(c=>{const sid=secid(c); return `s_${sid.startsWith('1.')?'sh':'sz'}${c}`;});
+  try{
+    const txt=await fetch(`https://qt.gtimg.cn/q=${qlist.join(',')}`).then(r=>r.text());
+    const map={};
+    txt.split(';').forEach(l=>{
+      const m=l.match(/v_(.+?)="(.+?)"/); if(!m) return;
+      const vs=m[2].split('~');
+      const price=parseFloat(vs[3]); const change=parseFloat(vs[4]); const prev=price-change;
+      let pct=parseFloat(vs[5]); if(isNaN(pct)&&prev) pct=(price-prev)/prev*100;
+      map[m[1]]={price,prev,change,pct};
+    });
+    watch.forEach(code=>{
+      const sid=secid(code); const qkey=`s_${sid.startsWith('1.')?'sh':'sz'}${code}`;
+      const d=map[qkey];
+      const pEl=document.getElementById('wp_'+code);
+      const cEl=document.getElementById('wc_'+code);
+      const sEl=document.getElementById('wsub_'+code);
+      if(d && pEl){
+        const up=d.change>=0;
+        pEl.textContent=d.price.toFixed(2); pEl.className=up?'up':'down';
+        if(cEl){cEl.textContent=(d.pct>0?'+':'')+d.pct.toFixed(2)+'%'; cEl.className=up?'up':'down';}
+        if(sEl) sEl.textContent='分时正常';
+      }
+    });
+  }catch(e){console.log('watch err',e);}
+}
+
+loadIdx(); loadWatch();
+setInterval(()=>{document.getElementById('t').textContent=new Date().toLocaleTimeString(); loadIdx();}, 30000);
+setInterval(loadWatch, 8000); // 自选8秒刷新，不清空DOM，不晃
+document.getElementById('add').onclick=()=>{
+  let c=document.getElementById('code').value.replace(/\D/g,'').padStart(6,'0');
+  if(!/^\d{6}$/.test(c)) return alert('6位代码');
+  watch=watch.filter(x=>x!==c); watch.unshift(c); localStorage.setItem('v5_watch',JSON.stringify(watch)); ensureWatchDom(); loadWatch(); document.getElementById('code').value='';
+};
+</script></body></html>
