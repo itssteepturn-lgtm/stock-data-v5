@@ -1,11 +1,12 @@
 {
-  "updated": "2026-09-23T17:25:31.610043",
-  "count": 100,
+  "updated": "2026-09-23T18:29:15.850066",
+  "count": 7407,
   "shard": "0/2",
-  "range": "0-50",
-  "ok": 50,
-  "fail": 0,
-  "saved_total": 50,
-  "v": "V5.10 V3稳定回归版-腾讯主源",
-  "note": "腾讯ifzq为主，不限速，东财为辅；Session复用，0.8-1.2秒/只，V3同样节奏所以稳；COST/ZQ/ZQ1今日参与，断档前端补"
+  "range": "0-3704",
+  "ok": 841,
+  "fail": 1053,
+  "cleaned_fake": 0,
+  "saved_total": 855,
+  "v": "V5.11 baostock fix ident",
+  "note": "修复 Author identity unknown，已加git config，永不再aborted"
 }
