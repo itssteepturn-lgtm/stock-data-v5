@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>短线盘面 V5.1</title>
+<style>
+:root{--bg:#0a0e14;--panel:#141a24;--line:#232f40;--text:#e8ecf2;--dim:#8a94a6;--up:#ff3b3b;--down:#00c873;--accent:#3a8bff}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,sans-serif}
+#app{max-width:430px;margin:0 auto;padding-bottom:80px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;margin:8px;overflow:hidden}
+.card-hd{padding:10px 12px;display:flex;justify-content:space-between;border-bottom:1px solid var(--line);font-size:13px;font-weight:700}
+.idx-row{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line)}
+.idx-left{width:88px}.idx-name{font-size:13px}.idx-price{font-size:12px;font-weight:700}.up{color:var(--up)}.down{color:var(--down)}
+.idx-cvs{flex:1;display:flex;gap:6px}.idx-k{width:56px;height:36px;background:#0a0e14;border:1px solid var(--line);border-radius:6px}.idx-f{flex:1;height:36px;background:#0a0e14;border:1px solid var(--line);border-radius:6px}
+.watch-row{display:flex;align-items:center;border-bottom:1px solid var(--line);min-height:72px}
+.watch-info{width:90px;padding:8px 12px}.watch-code{font-size:10px;color:var(--dim)}.watch-name{font-size:12px;font-weight:700}
+.watch-pct{font-size:11px}
+.watch-chart{flex:1;height:68px;position:relative;background:#0a0e14;margin:4px;border-radius:8px;border:1px solid var(--line);overflow:hidden}
+.hint{font-size:11px;color:var(--dim);padding:10px;text-align:center}
+.btn{padding:6px 12px;border-radius:8px;border:1px solid var(--line);background:#1c2532;color:var(--text);font-size:12px}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+input{background:#1c2532;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 10px;width:100%;font-size:13px}
+</style>
+</head>
+<body>
+<div id="app">
+<div class="card"><div class="card-hd"><b>指数 · 一行一指数 · 零轴+分界</b><span id="idx-time" style="font-size:10px;color:var(--dim)">加载中</span></div><div id="index-list"><div class="hint">正在接东财/腾讯...</div></div></div>
+<div class="card"><div class="card-hd"><b>自选 · 3s刷新 · 满宽分时</b><span id="data-badge" style="font-size:10px;color:var(--dim)">自养检测中</span></div><div id="watch-list"></div><div style="display:flex;gap:8px;padding:10px"><input id="add-code" placeholder="代码 600000"><button id="add-btn" class="btn btn-primary">添加置顶</button></div></div>
+<div class="card"><div class="card-hd"><b>选股</b></div><div class="hint">C50-SPD C75-UTD ZQ-HOLD ZQ-ACC-DIVE ZQ-PAIR-DIVE<br>等Actions养出data后可用，东财实时分时已可用</div></div>
+<div class="card"><div class="card-hd"><b>状态</b><span id="status" style="font-size:10px;color:var(--dim)"></span></div><div id="log" class="hint" style="text-align:left;white-space:pre-wrap"></div></div>
+</div>
+<script>
+const REPO='itssteepturn-lgtm/stock-data-v5';
+const RAW=`https://raw.githubusercontent.com/${REPO}/main`;
+function log(t){document.getElementById('log').textContent+=t+'\n';}
+function setup(c){const dpr=devicePixelRatio||1; const r=c.getBoundingClientRect(); const w=r.width||c.clientWidth; const h=r.height||c.clientHeight; c.width=w*dpr; c.height=h*dpr; const ctx=c.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0); return {ctx,w,h};}
+function secid(code){code=String(code).padStart(6,'0'); if(code.startsWith('6')) return `1.${code}`; if(code.startsWith('0')||code.startsWith('3')||code.startsWith('8')||code.startsWith('4')) return `0.${code}`; return `1.${code}`;}
+let watch=JSON.parse(localStorage.getItem('v5_watch')||'["000001","399006","600519","300313"]');
+function save(){localStorage.setItem('v5_watch',JSON.stringify(watch));}
+async function fetchSelf(path){
+  try{const r=await fetch(`${RAW}/${path}?t=${Date.now()}`); if(r.ok){log('自养 '+path+' OK'); return await r.json();}}catch(e){log('自养 '+path+' 失败 '+e);}
+  return null;
+}
+async function initBadge(){
+  const meta=await fetchSelf('data/meta.json');
+  const b=document.getElementById('data-badge');
+  if(meta){b.textContent=`自养:${meta.updated?.slice(0,10)} ${meta.count}支`; b.style.color='#7f7';}
+  else{b.textContent='自养:暂无，等待Actions首跑'; b.style.color='#fa5';}
+}
+const INDICES=[
+{name:'上证',code:'000001',secid:'1.000001',qt:'s_sh000001'},
+{name:'深证',code:'399001',secid:'0.399001',qt:'s_sz399001'},
+{name:'创业',code:'399006',secid:'0.399006',qt:'s_sz399006'},
+{name:'科创50',code:'000688',secid:'1.000688',qt:'s_sh000688'},
+{name:'北证50',code:'899050',secid:'0.899050',qt:'s_bj899050'},
+];
+async function fetchQt(qtList){
+  try{
+    const url=`https://qt.gtimg.cn/q=${qtList.join(',')}`;
+    const txt=await fetch(url).then(r=>r.text());
+    const out={};
+    txt.split(';').forEach(line=>{
+      const m=line.match(/v_(.+?)="(.+?)"/);
+      if(!m) return;
+      const key=m[1]; const vals=m[2].split('~');
+      out[key]={price:parseFloat(vals[3]),prev:parseFloat(vals[4]),chg:parseFloat(vals[32])};
+    });
+    return out;
+  }catch(e){log('腾讯接口失败 '+e); return {};}
+}
+async function fetchIdxKline(secid){
+  try{
+    const j=await fetch(`https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}&klt=101&fqt=1&lmt=20&fields2=f53`).then(r=>r.json());
+    return (j?.data?.klines||[]).map(k=>parseFloat(k.split(',')[2]));
+  }catch{return [];}
+}
+async function fetchFen(code){
+  const sid=secid(code);
+  try{
+    const j=await fetch(`https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${sid}&klt=1&fqt=1&lmt=242&fields2=f51,f53,f56`).then(r=>r.json());
+    const lines=j?.data?.klines||[];
+    const prev=j?.data?.preKPrice||0;
+    const pts=lines.map(l=>{const a=l.split(','); return {t:a[0], p:parseFloat(a[1]||a[2])};});
+    return {pts, prev:prev||pts[0]?.p||0};
+  }catch(e){log('分时 '+code+' 失败'); return {pts:[],prev:0};}
+}
+async function renderIndices(){
+  const wrap=document.getElementById('index-list');
+  document.getElementById('idx-time').textContent=new Date().toLocaleTimeString();
+  const qtList=INDICES.map(i=>i.qt);
+  const qtData=await fetchQt(qtList);
+  wrap.innerHTML='';
+  for(const idx of INDICES){
+    const row=document.createElement('div'); row.className='idx-row';
+    row.innerHTML=`<div class="idx-left"><div class="idx-name">${idx.name}</div><div id="ip_${idx.code}" class="idx-price">--</div><div id="ic_${idx.code}" style="font-size:11px">--</div></div><div class="idx-cvs"><canvas class="idx-k" id="ik_${idx.code}"></canvas><canvas class="idx-f" id="if_${idx.code}"></canvas></div>`;
+    wrap.appendChild(row);
+    const snap=qtData[idx.qt];
+    const pEl=document.getElementById(`ip_${idx.code}`), cEl=document.getElementById(`ic_${idx.code}`);
+    if(snap){
+      const up=snap.price>=snap.prev;
+      pEl.textContent=snap.price.toFixed(2); pEl.className='idx-price '+(up?'up':'down');
+      cEl.textContent=(snap.chg>0?'+':'')+snap.chg.toFixed(2)+'%'; cEl.className=up?'up':'down';
+    }
+    fetchIdxKline(idx.secid).then(closes=>{
+      if(!closes.length) return;
+      const c=document.getElementById(`ik_${idx.code}`); if(!c) return;
+      const {ctx,w,h}=setup(c); const min=Math.min(...closes),max=Math.max(...closes); const y=v=>h-2-(v-min)/(max-min||1)*(h-4);
+      ctx.clearRect(0,0,w,h); ctx.beginPath(); closes.forEach((v,i)=>{const x=i/(closes.length-1||1)*w; if(i==0) ctx.moveTo(x,y(v)); else ctx.lineTo(x,y(v));}); ctx.strokeStyle=snap&&snap.price>=snap.prev?'#ff3b3b':'#00c873'; ctx.lineWidth=1.2; ctx.stroke();
+    });
+    fetchFen(idx.code).then(({pts,prev})=>{
+      if(!pts.length) return;
+      const c=document.getElementById(`if_${idx.code}`); if(!c) return;
+      const {ctx,w,h}=setup(c); const prices=pts.map(p=>p.p); const pr=prev||prices[0]; const lim=0.04; const yMin=pr*(1-lim), yMax=pr*(1+lim); const y=v=>h-2-(v-yMin)/(yMax-yMin||1)*(h-4);
+      ctx.clearRect(0,0,w,h);
+      ctx.save(); ctx.strokeStyle='rgba(255,255,255,.25)'; ctx.setLineDash([3,3]); ctx.beginPath(); ctx.moveTo(0,y(pr)); ctx.lineTo(w,y(pr)); ctx.stroke(); ctx.restore();
+      ctx.save(); ctx.strokeStyle='rgba(255,255,255,.12)'; ctx.setLineDash([4,4]); ctx.beginPath(); ctx.moveTo(w/2,0); ctx.lineTo(w/2,h); ctx.stroke(); ctx.restore();
+      const up=prices[prices.length-1]>=pr;
+      ctx.beginPath(); prices.forEach((p,i)=>{const x=i/(prices.length-1||1)*w; if(i==0) ctx.moveTo(x,y(p)); else ctx.lineTo(x,y(p));}); ctx.strokeStyle=up?'#ff3b3b':'#00c873'; ctx.lineWidth=1; ctx.stroke();
+    });
+  }
+}
+async function renderWatch(){
+  const wrap=document.getElementById('watch-list'); wrap.innerHTML='';
+  for(let i=0;i<watch.length;i++){
+    const code=watch[i];
+    const row=document.createElement('div'); row.className='watch-row';
+    row.innerHTML=`<div class="watch-info"><div class="watch-name">${code}</div><div class="watch-code">${code}</div><div id="wp_${code}" class="watch-pct">加载中</div></div><div class="watch-chart"><canvas id="wc_${code}" style="width:100%;height:68px"></canvas></div>`;
+    wrap.appendChild(row);
+    Promise.all([fetchQt([`s_${secid(code).startsWith('1')?'sh':'sz'}${code}`]), fetchFen(code)]).then(([qtData, fen])=>{
+      const key=Object.keys(qtData)[0]; const snap=qtData[key];
+      const el=document.getElementById(`wp_${code}`);
+      if(snap&&el){ const up=snap.price>=snap.prev; el.textContent=`${snap.price.toFixed(2)} ${(snap.chg>0?'+':'')+snap.chg.toFixed(2)}%`; el.className='watch-pct '+(up?'up':'down'); }
+      const c=document.getElementById(`wc_${code}`); if(!c||!fen.pts.length) return;
+      const {ctx,w,h}=setup(c); const prices=fen.pts.map(p=>p.p); const prev=fen.prev||snap?.prev||prices[0]; const lim=code.startsWith('30')||code.startsWith('68')?0.2:code.startsWith('8')?0.3:0.1; const yMin=prev*(1-lim), yMax=prev*(1+lim); const y=v=>h-2-(v-yMin)/(yMax-yMin||1)*(h-4);
+      ctx.clearRect(0,0,w,h);
+      ctx.save(); ctx.strokeStyle='rgba(255,255,255,.25)'; ctx.setLineDash([3,3]); ctx.beginPath(); ctx.moveTo(0,y(prev)); ctx.lineTo(w,y(prev)); ctx.stroke(); ctx.restore();
+      ctx.save(); ctx.strokeStyle='rgba(255,255,255,.12)'; ctx.setLineDash([4,4]); ctx.beginPath(); ctx.moveTo(w/2,0); ctx.lineTo(w/2,h); ctx.stroke(); ctx.restore();
+      const up=prices[prices.length-1]>=prev; ctx.beginPath(); prices.forEach((p,i)=>{const x=i/(prices.length-1||1)*w; if(i==0) ctx.moveTo(x,y(p)); else ctx.lineTo(x,y(p));}); ctx.strokeStyle=up?'#ff3b3b':'#00c873'; ctx.lineWidth=1.2; ctx.stroke();
+      ctx.lineTo(w,y(prev)); ctx.lineTo(0,y(prev)); ctx.closePath(); ctx.fillStyle=up?'rgba(255,59,59,.12)':'rgba(0,200,115,.12)'; ctx.fill();
+    });
+  }
+}
+document.getElementById('add-btn').onclick=()=>{
+  let code=document.getElementById('add-code').value.trim().replace(/\D/g,'').padStart(6,'0');
+  if(!/^\d{6}$/.test(code)) return alert('输入6位代码');
+  watch=watch.filter(c=>c!==code); watch.unshift(code); save(); renderWatch(); document.getElementById('add-code').value='';
+};
+(async()=>{await initBadge(); await renderIndices(); await renderWatch(); setInterval(renderIndices,30000); setInterval(renderWatch,5000); document.getElementById('status').textContent='V5.1 东财已接通 · 未攒数据也能显示';})();
+</script>
+</body>
+</html>
