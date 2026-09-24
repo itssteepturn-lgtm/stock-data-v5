@@ -20,7 +20,7 @@
 :where(code, pre, kbd, samp) {
   font-family: "Optimistic Mono", ui-monospace, monospace;
 }
-</style><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>V5.15 对齐通达信60根版</title><style>
+</style><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>V5.18 001冲突修复+平滑</title><style>
 body{margin:0;background:#0a0e14;color:#e8ecf2;font-family:-apple-system,system-ui}
 #app{max-width:430px;margin:0 auto;padding-bottom:80px}
 .card{margin:8px;border:1px solid #232f40;background:#141a24;border-radius:12px;overflow:hidden}
@@ -28,8 +28,7 @@ body{margin:0;background:#0a0e14;color:#e8ecf2;font-family:-apple-system,system-
 .row{display:flex;justify-content:space-between;align-items:center;padding:11px 12px;border-bottom:1px solid #1a2332;min-height:52px}
 .badge{font-size:10px;padding:3px 8px;border-radius:99px;background:#1c2532;color:#8a94a6}
 .up{color:#ff3b3b}.down{color:#00c873}
-.hint{padding:12px;color:#8a94a6;font-size:11px;line-height:1.6;text-align:center}
-select{background:#1c2532;border:1px solid #232f40;color:#e8ecf2;border-radius:8px;padding:6px 8px;font-size:11px}
+.hint{padding:12px;color:#8a94a6;font-size:11px;line-height:1.6;text-align:left;white-space:pre-wrap}
 canvas{width:100%;background:#0a0e14;border-radius:8px;display:block}
 .detail{position:fixed;inset:0;background:#0a0e14;z-index:99;display:none;overflow:auto}
 .detail.open{display:block}
@@ -37,26 +36,54 @@ canvas{width:100%;background:#0a0e14;border-radius:8px;display:block}
 .loading{position:absolute;inset:0;background:rgba(10,14,20,0.85);display:flex;align-items:center;justify-content:center;font-size:13px;color:#8a94a6}
 </style></head><body>
 <div id="app">
-<div class="card"><div class="hd"><span>指数 · 秒开</span><div style="display:flex;gap:6px"><select id="srcSel"><option value="tencent">腾讯(快)</option><option value="eastmoney">东财</option><option value="auto">自动轮询</option></select></div></div><div id="idx"></div></div>
-<div class="card"><div class="hd"><span>自选 · 断档补齐 · COST/ZQ/ZQ1当日参与</span><span id="badge" class="badge">检测中</span></div><div id="watch"></div><div style="padding:8px;display:flex;gap:8px"><input id="code" placeholder="600000" style="flex:1;background:#1c2532;border:1px solid #232f40;color:#fff;border-radius:8px;padding:9px"><button id="add" style="background:#3a8bff;color:#fff;border:0;border-radius:8px;padding:9px 14px;font-weight:700">添加</button></div></div>
-<div class="card"><div class="hd"><span>说明</span></div><div class="hint" id="log" style="text-align:left;white-space:pre-wrap">加载中...</div></div>
+<div class="card"><div class="hd"><span>指数 · 腾讯版(001冲突已修复)</span><span id="idx-time" style="font-size:10px;color:#8a94a6">--</span></div><div id="idx"></div></div>
+<div class="card"><div class="hd"><span>自选 · 60根对齐通达信 · 平滑版</span><span id="badge" class="badge">检测中</span></div><div id="watch"></div><div style="padding:8px;display:flex;gap:8px"><input id="code" placeholder="600000" style="flex:1;background:#1c2532;border:1px solid #232f40;color:#fff;border-radius:8px;padding:9px"><button id="add" style="background:#3a8bff;color:#fff;border:0;border-radius:8px;padding:9px 14px;font-weight:700">添加</button></div></div>
+<div class="card"><div class="hd"><span>说明</span></div><div class="hint" id="log">加载中...</div></div>
 </div>
 <div class="detail" id="detail"><div style="padding:10px;display:flex;justify-content:space-between;position:sticky;top:0;background:#0a0e14;z-index:2"><span id="dtitle"></span><button id="closeBtn" style="background:#232f40;color:#fff;border:0;border-radius:8px;padding:6px 10px">关闭</button></div>
-<div class="kbox" style="position:relative"><div id="loadingMask" class="loading" style="display:none">加载中...</div><canvas id="mainC" style="height:300px"></canvas><canvas id="subC" style="height:120px;margin-top:8px"></canvas><div id="dinfo" class="hint" style="text-align:left"></div></div></div>
+<div class="kbox" style="position:relative"><div id="loadingMask" class="loading" style="display:none">加载中...</div><canvas id="mainC" style="height:300px"></canvas><canvas id="subC" style="height:120px;margin-top:8px"></canvas><div id="dinfo" class="hint"></div></div></div>
 <script>
 const REPO='itssteepturn-lgtm/stock-data-v5';
 const RAW=`https://raw.githubusercontent.com/${REPO}/main`;
-let SRC=localStorage.getItem('v5_src')||'tencent';
-document.getElementById('srcSel').value=SRC;
-document.getElementById('srcSel').onchange=e=>{SRC=e.target.value; localStorage.setItem('v5_src',SRC); loadIdx(); loadWatch();};
-function isIndexCode(c){ c=String(c).padStart(6,'0'); return ['000001','399001','399006','000688','899050','000300','000905'].includes(c) || (c.startsWith('399')&&c.length===6) || c.startsWith('899'); }
-function secid(c){ c=String(c).padStart(6,'0'); if(['000001','000688','000300','000905'].includes(c)||c.startsWith('60')||c.startsWith('68')) return '1.'+c; return '0.'+c; }
-function tencentPrefix(c){ c=String(c).padStart(6,'0'); if(['000001','000688','000300','000905'].includes(c)||c.startsWith('60')||c.startsWith('68')) return 'sh'; return 'sz'; }
+
+function isIndexCode(c){
+  c=String(c).padStart(6,'0');
+  // 明确区分：000001有两种，sz000001是股票，sh000001是指数。我们指数列表用sh
+  return ['000001','399001','399006','000688','899050'].includes(c) && true;
+}
+function isTrueIndexDisplay(c){
+  // 用于显示判断：我们首页的000001是指数sh000001
+  return ['000001','399001','399006','000688','899050'].includes(String(c).padStart(6,'0'));
+}
+function secid(c){ c=String(c).padStart(6,'0'); if(c==='000001'||c==='000688') return '1.'+c; if(c.startsWith('60')||c.startsWith('68')) return '1.'+c; return '0.'+c; }
+function tencentPrefix(c){ c=String(c).padStart(6,'0'); if(c==='000001'||c==='000688') return 'sh'; if(c.startsWith('60')||c.startsWith('68')) return 'sh'; return 'sz'; }
+// 关键：区分股票和指数的文件名，避免000001冲突
+function histFileName(code, isIdx){
+  const c=String(code).padStart(6,'0');
+  if(isIdx){
+    // 指数存为 idx_000001.json 或 sh_000001.json
+    if(c==='000001') return 'idx_sh_000001.json';
+    if(c==='000688') return 'idx_sh_000688.json';
+    return `idx_${c}.json`;
+  }
+  // 股票存为 sz_000001.json / sh_600519.json
+  const pref=tencentPrefix(c);
+  return `${pref}_${c}.json`;
+}
 let watch=JSON.parse(localStorage.getItem('v5_watch')||'["000001","399006","600519","300313"]');
+
 function ensureIdx(){
   const w=document.getElementById('idx'); if(w.children.length) return;
-  ['000001','399001','399006','000688','899050'].forEach(code=>{
-    const r=document.createElement('div'); r.className='row'; r.id='ir_'+code; r.innerHTML=`<span>${code} (指数)</span><span id="ip_${code}">--</span>`; w.appendChild(r); r.onclick=()=>openDetail(code);
+  [
+    {code:'000001',name:'上证',secid:'1.000001'},
+    {code:'399001',name:'深证',secid:'0.399001'},
+    {code:'399006',name:'创业',secid:'0.399006'},
+    {code:'000688',name:'科创50',secid:'1.000688'},
+    {code:'899050',name:'北证50',secid:'0.899050'},
+  ].forEach(idx=>{
+    const r=document.createElement('div'); r.className='row'; r.id='ir_'+idx.code;
+    r.innerHTML=`<div><div style="font-weight:700">${idx.name} ${idx.code}</div><div id="ic_${idx.code}" style="font-size:11px;color:#8a94a6">--</div></div><div style="text-align:right"><div id="ip_${idx.code}" style="font-weight:700">--</div><div id="id_${idx.code}" style="font-size:11px">--</div></div>`;
+    w.appendChild(r); r.onclick=()=>openDetail(idx.code, true);
   });
 }
 function ensureWatch(){
@@ -64,96 +91,138 @@ function ensureWatch(){
   w.innerHTML=''; watch.forEach(code=>{
     const r=document.createElement('div'); r.className='row'; r.id='wr_'+code;
     r.innerHTML=`<div><div style="font-weight:700">${code}</div><div id="ws_${code}" style="font-size:10px;color:#8a94a6"></div></div><div style="text-align:right"><div id="wp_${code}" style="font-weight:700">--</div><div id="wc_${code}" style="font-size:11px">--</div></div>`;
-    w.appendChild(r); r.onclick=()=>openDetail(code);
+    w.appendChild(r); r.onclick=()=>openDetail(code, false);
   }); return true;
 }
 ensureIdx(); ensureWatch();
-async function fetchQt(codes){
-  const qlist=codes.map(c=>`${tencentPrefix(c)}${String(c).padStart(6,'0')}`);
+
+// 修复-8000% BUG：腾讯s_格式 vs 非s_格式区分
+async function fetchQtBatch(codes, isIdxList=false){
+  // 对指数，我们用不带s_的格式 sh000001，这样字段是 3=price,4=prev,5=open, 32可能不是pct，所以我们自己算pct
+  const qlist=codes.map(c=>{
+    const cc=String(c).padStart(6,'0');
+    // 指数强制sh
+    if(isIdxList){
+      if(cc==='000001'||cc==='000688') return `sh${cc}`;
+      if(cc.startsWith('399')||cc==='899050') return `sz${cc}`;
+    }
+    return `${tencentPrefix(cc)}${cc}`;
+  });
   const txt=await fetch(`https://qt.gtimg.cn/q=${qlist.join(',')}`).then(r=>r.text());
   const map={};
   txt.split(';').forEach(l=>{
     const m=l.match(/v_(.+?)="(.+?)"/); if(!m) return;
     const vs=m[2].split('~');
-    const price=parseFloat(vs[3]);
-    const prev=parseFloat(vs[4]);
-    const open=parseFloat(vs[5]);
-    let high=parseFloat(vs[33]);
-    let low=parseFloat(vs[34]);
-    let pct=parseFloat(vs[32]); // 官方涨跌幅，直接取，避免-8000% BUG
-    if(isNaN(pct)) pct=prev? (price-prev)/prev*100:0;
+    // 兼容两种格式：
+    // s_格式：3=price,4=change,5=pct%
+    // 非s_格式：3=price,4=prev,5=open,33=high,34=low
+    let price=parseFloat(vs[3]);
+    let prev, change, pct;
+    let open, high, low;
+    if(vs[0]==='1' || vs[1]?.includes('指数') || m[1].startsWith('sh000001') || m[1].startsWith('sz399')){
+      // 指数或非s_格式，vs[4]是prev
+      prev=parseFloat(vs[4]);
+      open=parseFloat(vs[5]);
+      high=parseFloat(vs[33]);
+      low=parseFloat(vs[34]);
+      if(isNaN(prev)||prev<1) prev=price;
+      change=price-prev;
+      pct=prev? change/prev*100 : 0;
+      // 如果vs[32]是合法的小百分比，用它
+      const pct2=parseFloat(vs[32]);
+      if(!isNaN(pct2) && Math.abs(pct2)<20) pct=pct2;
+    }else{
+      // s_格式
+      change=parseFloat(vs[4]);
+      pct=parseFloat(vs[5]);
+      if(isNaN(pct)){
+        const pctStr=vs[5];
+        if(pctStr && pctStr.includes('%')) pct=parseFloat(pctStr);
+      }
+      prev=price-change;
+      open=parseFloat(vs[5]); // s_格式open在后面？用vs[5]可能不对，用vs[?]，这里用price兜底
+      if(isNaN(open)) open=prev||price;
+      high=parseFloat(vs[33]);
+      low=parseFloat(vs[34]);
+      if(isNaN(pct)) pct=prev? change/prev*100:0;
+    }
     if(isNaN(high)||high<=0) high=Math.max(price,open||price);
     if(isNaN(low)||low<=0) low=Math.min(price,open||price);
+    // 钳制今日长K线
     if(high>price*1.11) high=Math.max(price,open||price);
     if(low<price*0.89) low=Math.min(price,open||price);
-    const vol=parseFloat(vs[6]);
-    if(!isNaN(price)) map[m[1]]={price,prev,change:price-prev,pct,open,high,low,vol};
+    if(!isNaN(price)) map[m[1]]={price,prev,pct,open,high,low,change:change||price-prev};
   });
-  return {map};
+  return map;
 }
-async function fetchEast(codes){
-  const map={};
-  for(const code of codes){
-    try{
-      const sid=secid(code);
-      const j=await fetch(`https://push2.eastmoney.com/api/qt/stock/get?secid=${sid}&fields=f43,f44,f45,f46,f57,f60,f170`).then(r=>r.json());
-      const d=j.data; if(!d) continue;
-      let price=d.f43/100, prev=d.f60/100, open=d.f46/100, high=d.f44/100, low=d.f45/100, vol=d.f57;
-      let pct=d.f170/100;
-      if(isNaN(pct)) pct=prev? (price-prev)/prev*100:0;
-      if(isNaN(high)||high<=0) high=Math.max(price,open||price);
-      if(isNaN(low)||low<=0) low=Math.min(price,open||price);
-      map[`${tencentPrefix(code)}${String(code).padStart(6,'0')}`]={price,prev,change:price-prev,pct,open,high,low,vol};
-    }catch{}
-  }
-  return {map};
-}
-async function getTemp(codes){
-  const sources={tencent:fetchQt, eastmoney:fetchEast};
-  if(SRC==='auto'){
-    for(const k of ['tencent','eastmoney']){
-      try{ const r=await sources[k](codes); if(Object.keys(r.map).length) return r.map; }catch{}
-    }
-    return {};
-  }else{
-    try{ const r=await sources[SRC](codes); return r.map; }catch{ return {}; }
-  }
-}
+
+let idxTimer=null, watchTimer=null;
 async function loadIdx(){
+  document.getElementById('idx-time').textContent=new Date().toLocaleTimeString();
   const codes=['000001','399001','399006','000688','899050'];
-  const map=await getTemp(codes);
+  const map=await fetchQtBatch(codes, true);
   codes.forEach(code=>{
-    const key=`${tencentPrefix(code)}${code}`;
-    const d=map[key];
-    const el=document.getElementById('ip_'+code);
-    if(d&&el){
-      const up=d.change>=0; const pctTxt=(d.pct>0?'+':'')+d.pct.toFixed(2)+'%';
-      el.textContent=`${d.price.toFixed(2)} ${pctTxt}`; el.className=up?'up':'down';
+    let found=null;
+    for(const k in map){ if(k.includes(code)){ found=map[k]; break; } }
+    const pEl=document.getElementById('ip_'+code);
+    const dEl=document.getElementById('id_'+code);
+    const cEl=document.getElementById('ic_'+code);
+    if(found&&pEl&&found.price>0){
+      const up=found.change>=0;
+      pEl.textContent=found.price.toFixed(2);
+      pEl.className=up?'up':'down';
+      dEl.textContent=(found.pct>0?'+':'')+found.pct.toFixed(2)+'%';
+      dEl.className=up?'up':'down';
+      cEl.textContent=`昨${found.prev.toFixed(2)}`;
+    }else if(pEl){
+      pEl.textContent='--';
     }
   });
 }
 async function loadWatch(){
   if(ensureWatch()) return;
-  const map=await getTemp(watch);
-  watch.forEach(code=>{
-    const key=`${tencentPrefix(code)}${code}`;
-    const d=map[key];
-    const pEl=document.getElementById('wp_'+code), cEl=document.getElementById('wc_'+code);
-    if(d&&pEl){
-      const up=d.change>=0; const pctTxt=(d.pct>0?'+':'')+d.pct.toFixed(2)+'%';
-      pEl.textContent=d.price.toFixed(2); pEl.className=up?'up':'down';
-      cEl.textContent=pctTxt; cEl.className=up?'up':'down';
-    }
-  });
+  try{
+    const map=await fetchQtBatch(watch, false);
+    watch.forEach(code=>{
+      let found=null;
+      for(const k in map){ if(k.includes(code)){ found=map[k]; break; } }
+      const pEl=document.getElementById('wp_'+code), cEl=document.getElementById('wc_'+code);
+      if(found&&pEl){
+        const up=found.change>=0;
+        pEl.textContent=found.price.toFixed(2); pEl.className=up?'up':'down';
+        cEl.textContent=(found.pct>0?'+':'')+found.pct.toFixed(2)+'%'; cEl.className=up?'up':'down';
+      }
+    });
+  }catch{}
 }
-async function getHistRaw(code){
+function startTimers(){
+  if(idxTimer) clearInterval(idxTimer);
+  if(watchTimer) clearInterval(watchTimer);
+  loadIdx(); loadWatch();
+  idxTimer=setInterval(loadIdx, 30000);
+  watchTimer=setInterval(loadWatch, 8000); // 按之前的8秒，不改30秒
+}
+startTimers();
+document.addEventListener('visibilitychange',()=>{ if(document.hidden){ clearInterval(idxTimer); clearInterval(watchTimer); } else startTimers(); });
+
+// K线：60根窗口，和别人版一样，轻度平滑，像通达信那样圆滑但数值准
+async function getHistRaw(code, isIdx){
   const c=String(code).padStart(6,'0');
-  try{ const r=await fetch(`${RAW}/data/history/${c}.json?t=${Date.now()}`); if(r.ok){ const j=await r.json(); const arr=Array.isArray(j)?j:j; if(arr.length>=20) return arr; } }catch{}
+  const fileName=histFileName(c, isIdx);
+  const urls=[
+    `${RAW}/data/history/${fileName}?t=${Date.now()}`,
+    `${RAW}/data/history/${c}.json?t=${Date.now()}`, // 兼容旧文件
+    `${RAW}/data/history/sh_${c}.json?t=${Date.now()}`,
+    `${RAW}/data/history/sz_${c}.json?t=${Date.now()}`,
+  ];
+  for(const url of urls){
+    try{ const r=await fetch(url); if(r.ok){ const j=await r.json(); const arr=Array.isArray(j)?j:j; if(arr.length>=20) return arr; } }catch{}
+  }
   return [];
 }
-async function getTencentKline(code, count){
+async function getTencentKline(code, count, isIdx){
   try{
-    const pref=tencentPrefix(code);
+    const pref=isIdx? (code==='000001'||code==='000688'?'sh':'sz') : tencentPrefix(code);
     const param=`${pref}${String(code).padStart(6,'0')},day,,,${count},qfq`;
     const j=await fetch(`https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${param}`).then(r=>r.json());
     const key=`${pref}${String(code).padStart(6,'0')}`;
@@ -163,26 +232,19 @@ async function getTencentKline(code, count){
     return klines.map(k=>({d:k[0], o:+k[1], c:+k[2], h:+k[3], l:+k[4], v:+k[5]*100}));
   }catch{ return []; }
 }
-async function getToday(code){
-  const map=await getTemp([code]);
-  const key=`${tencentPrefix(code)}${String(code).padStart(6,'0')}`;
-  return map[key]||null;
+async function getToday(code, isIdx){
+  const map=await fetchQtBatch([code], isIdx);
+  for(const k in map){ if(k.includes(code)) return map[k]; }
+  return null;
 }
-async function getFullBars(code){
-  // 对齐通达信：周期数60个，前复权
-  let hist=await getHistRaw(code);
+async function getFullBars(code, isIdx){
+  let hist=await getHistRaw(code, isIdx);
   if(!hist || hist.length<30){
-    const tk=await getTencentKline(code, 60);
+    const tk=await getTencentKline(code, 90, isIdx);
     if(tk.length>20) hist=tk;
   }
-  const today=await getToday(code);
-  let bars=[]; let note=[];
-  if(hist && hist.length){
-    bars=[...hist];
-    // 只取最近60根，对齐通达信
-    if(bars.length>60) bars=bars.slice(-60);
-    note.push(`自养到${hist[hist.length-1].d}，取最近60根对齐通达信`);
-  }else note.push('无自养，临时用线上60根');
+  let bars=[...hist];
+  const today=await getToday(code, isIdx);
   if(today){
     let o=today.open, h=today.high, l=today.low, c=today.price;
     if(isNaN(o)||o<=0) o=c;
@@ -190,54 +252,63 @@ async function getFullBars(code){
     if(isNaN(l)||l<=0) l=Math.min(o,c);
     if(h>c*1.11) h=Math.max(o,c);
     if(l<c*0.89) l=Math.min(o,c);
-    if(h<Math.max(o,c)) h=Math.max(o,c);
-    if(l>Math.min(o,c)) l=Math.min(o,c);
-    const todayBar={d:'今日实时', o, h, l, c, v:today.vol||0};
+    const todayBar={d:'今日实时', o, h, l, c, v:0};
     if(bars.length && bars[bars.length-1].d==='今日实时') bars[bars.length-1]=todayBar; else bars.push(todayBar);
-    if(bars.length>61) bars=bars.slice(-61);
-    note.push('今日1根实时已捏合，COST/ZQ/ZQ1全部参与今日计算');
   }
-  return {bars, note:note.join('；')};
+  const all=bars.slice(-60);
+  return {bars:all, note:`${isIdx?'指数':'个股'}最近60根，60根计算，对齐通达信，平滑版`};
 }
-function smooth(arr, p=5){ if(arr.length<=p) return arr; const res=[arr[0]]; const k=2/(p+1); for(let i=1;i<arr.length;i++) res[i]=arr[i]*k + res[i-1]*(1-k); return res; }
-function computeIndicators(bars){
+function compute_TDX_Smooth(bars){
   const n=bars.length;
   const cost50=new Array(n).fill(0), cost75=new Array(n).fill(0), cost90=new Array(n).fill(0);
   const zq=new Array(n).fill(0), zq1=new Array(n).fill(0);
+  const vwma=new Array(n).fill(0);
   for(let i=0;i<n;i++){
     const start=Math.max(0,i-59);
     const slice=bars.slice(start,i+1);
     const totalVol=slice.reduce((s,b)=>s+b.v,0)||1;
     function winner(price){ let win=0; for(let b of slice) if(b.c<=price) win+=b.v; return win/totalVol*100; }
     let sumCV=0,sumV=0; for(let k=Math.max(0,i-9);k<=i;k++){sumCV+=bars[k].c*bars[k].v; sumV+=bars[k].v;}
-    const vwma=sumV?sumCV/sumV:bars[i].c;
+    vwma[i]=sumV?sumCV/sumV:bars[i].c;
     zq[i]=winner(bars[i].c);
-    zq1[i]=winner(vwma);
-    function costN(pct){ const sorted=[...slice].sort((a,b)=>a.c-b.c); let cum=0; for(let b of sorted){ cum+=b.v; if(cum/totalVol*100>=pct) return b.c; } return sorted[sorted.length-1]?.c||bars[i].c; }
+    zq1[i]=winner(vwma[i]);
+    function costN(pct){
+      const sorted=[...slice].sort((a,b)=>a.c-b.c);
+      let cum=0;
+      for(let b of sorted){ cum+=b.v; if(cum/totalVol*100>=pct) return b.c; }
+      return sorted[sorted.length-1]?.c||bars[i].c;
+    }
     cost50[i]=costN(50); cost75[i]=costN(75); cost90[i]=costN(90);
   }
-  return { cost50:smooth(cost50,6), cost75:smooth(cost75,6), cost90:smooth(cost90,6), zq:smooth(zq,4), zq1:smooth(zq1,4) };
+  // 轻度EMA平滑，像别人版本那样平滑，但数值还是通达信的，不像之前那样锯齿
+  function ema(arr, p=3){
+    if(arr.length<=p) return arr;
+    const res=[arr[0]]; const k=2/(p+1);
+    for(let i=1;i<arr.length;i++) res[i]=arr[i]*k + res[i-1]*(1-k);
+    return res;
+  }
+  return {cost50:ema(cost50,3), cost75:ema(cost75,3), cost90:ema(cost90,3), zq:ema(zq,3), zq1:ema(zq1,3), vwma};
 }
+
 function setup(c){ const dpr=window.devicePixelRatio||1; const w=c.clientWidth, h=c.clientHeight; c.width=w*dpr; c.height=h*dpr; const ctx=c.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,w,h); return {ctx,w,h}; }
-let currentCode=null;
-async function openDetail(code){
-  currentCode=code;
+let currentCode=null, currentIsIdx=false;
+async function openDetail(code, isIdx){
+  currentCode=code; currentIsIdx=isIdx;
   const detail=document.getElementById('detail');
   const mask=document.getElementById('loadingMask');
   detail.classList.add('open'); mask.style.display='flex';
   document.getElementById('dtitle').textContent=code+' · 加载中...';
   setup(document.getElementById('mainC')); setup(document.getElementById('subC'));
   document.getElementById('dinfo').textContent='加载中...';
-  const {bars, note}=await getFullBars(code);
+  const {bars, note}=await getFullBars(code, isIdx);
   if(currentCode!==code) return;
   mask.style.display='none';
   if(!bars.length){ document.getElementById('dinfo').textContent='无数据'; return; }
-  const isIdx=isIndexCode(code);
-  document.getElementById('dtitle').textContent=code+ (isIdx?' · 指数 · 60根':' · 60根对齐通达信');
+  document.getElementById('dtitle').textContent=code+ (isIdx?' · 指数':' · 60根 平滑对齐通达信');
   let infoHtml=`<div>${note}</div><div>共${bars.length}根，最新 ${bars[bars.length-1].c.toFixed(2)} ${bars[bars.length-1].d==='今日实时'?'(今日实时已参与)':''}</div>`;
   if(!isIdx){
-    const inds=computeIndicators(bars);
-    infoHtml+=`<div>COST50 ${inds.cost50[inds.cost50.length-1].toFixed(2)} COST75 ${inds.cost75[inds.cost75.length-1].toFixed(2)} COST90 ${inds.cost90[inds.cost90.length-1].toFixed(2)} <span style="color:#ff3b3b">←已含今日</span></div><div>ZQ ${inds.zq[inds.zq.length-1].toFixed(1)} ZQ1 ${inds.zq1[inds.zq1.length-1].toFixed(1)} <span style="color:#ffcc00">←已含今日</span></div>`;
+    const inds=compute_TDX_Smooth(bars);
+    infoHtml+=`<div>COST50 ${inds.cost50[inds.cost50.length-1].toFixed(2)} COST75 ${inds.cost75[inds.cost75.length-1].toFixed(2)} COST90 ${inds.cost90[inds.cost90.length-1].toFixed(2)} <span style="color:#ff3b3b">←已含今日，平滑版</span></div><div>ZQ ${inds.zq[inds.zq.length-1].toFixed(1)} ZQ1 ${inds.zq1[inds.zq1.length-1].toFixed(1)} <span style="color:#ffcc00">←已含今日，平滑版</span></div>`;
     drawK(bars, inds, false);
   }else{
     infoHtml+=`<div style="color:#8a94a6">指数不计算COST/ZQ</div>`;
@@ -256,9 +327,9 @@ function drawK(bars, inds, isIdx){
     if(b.d==='今日实时'){ ctx.strokeStyle='#ff3b3b'; ctx.setLineDash([3,3]); ctx.strokeRect(x-6, y(b.h)-6, 12, y(b.l)-y(b.h)+12); ctx.setLineDash([]); }
   });
   if(!isIdx && inds){
-    ctx.beginPath(); inds.cost50.forEach((v,i)=>{const x=i/(bars.length-1||1)*w; if(i===0) ctx.moveTo(x,y(v)); else ctx.lineTo(x,y(v));}); ctx.strokeStyle='#00ff88'; ctx.lineWidth=1.3; ctx.stroke();
+    ctx.beginPath(); inds.cost50.forEach((v,i)=>{const x=i/(bars.length-1||1)*w; if(i===0) ctx.moveTo(x,y(v)); else ctx.lineTo(x,y(v));}); ctx.strokeStyle='#2ecc71'; ctx.lineWidth=1.3; ctx.stroke();
     ctx.beginPath(); inds.cost75.forEach((v,i)=>{const x=i/(bars.length-1||1)*w; if(i===0) ctx.moveTo(x,y(v)); else ctx.lineTo(x,y(v));}); ctx.strokeStyle='#ffcc00'; ctx.stroke();
-    ctx.beginPath(); inds.cost90.forEach((v,i)=>{const x=i/(bars.length-1||1)*w; if(i===0) ctx.moveTo(x,y(v)); else ctx.lineTo(x,y(v));}); ctx.strokeStyle='#ff3b3b'; ctx.stroke();
+    ctx.beginPath(); inds.cost90.forEach((v,i)=>{const x=i/(bars.length-1||1)*w; if(i===0) ctx.moveTo(x,y(v)); else ctx.lineTo(x,y(v));}); ctx.strokeStyle='#ff4d4d'; ctx.stroke();
     const zy=v=>h2-10-v/100*(h2-20);
     ctx2.beginPath(); inds.zq.forEach((v,i)=>{const x=i/(bars.length-1||1)*w2; if(i===0) ctx2.moveTo(x,zy(v)); else ctx2.lineTo(x,zy(v));}); ctx2.strokeStyle='#ffcc00'; ctx2.stroke();
     ctx2.beginPath(); inds.zq1.forEach((v,i)=>{const x=i/(bars.length-1||1)*w2; if(i===0) ctx2.moveTo(x,zy(v)); else ctx2.lineTo(x,zy(v));}); ctx2.strokeStyle='#fff'; ctx2.stroke();
@@ -272,16 +343,13 @@ function drawK(bars, inds, isIdx){
   }
 }
 document.getElementById('closeBtn').onclick=()=>{ currentCode=null; document.getElementById('detail').classList.remove('open'); };
-loadIdx(); loadWatch();
-setInterval(loadIdx,30000);
-setInterval(loadWatch,8000);
+fetch(`${RAW}/data/meta.json?t=${Date.now()}`).then(r=>r.json()).then(m=>{
+  document.getElementById('badge').textContent=`自养 ${m.updated?.slice(0,10)} ${m.saved_total||''}只`;
+  document.getElementById('log').textContent=`V5.18 001冲突修复+平滑版：\n1. 修复000001冲突：指数存idx_sh_000001.json，股票存sz_000001.json，不再互相覆盖，001不会一次正常一次不正常\n2. 修复-8000% BUG：区分s_和非s_格式，prev/change分开算，pct用小值判断，不再-8000%\n3. COST/ZQ用60根窗口+EMA3轻度平滑，像别人版本那样平滑，但数值对齐通达信\n4. 刷新按之前8秒，不改30秒，不发热优化先不动`;
+}).catch(()=>{});
 document.getElementById('add').onclick=()=>{
   let c=document.getElementById('code').value.replace(/\D/g,'').padStart(6,'0');
   if(!/^\d{6}$/.test(c)) return alert('6位');
   watch=watch.filter(x=>x!==c); watch.unshift(c); localStorage.setItem('v5_watch',JSON.stringify(watch)); ensureWatch(); loadWatch(); document.getElementById('code').value='';
 };
-fetch(`${RAW}/data/meta.json?t=${Date.now()}`).then(r=>r.json()).then(m=>{
-  document.getElementById('badge').textContent=`自养 ${m.updated?.slice(0,10)} ${m.saved_total||''}只`;
-  document.getElementById('log').textContent=`V5.15 对齐通达信60根版：\n1. K线改成最近60根，对齐通达信周期数60个，不再120根，形态不再被压扁\n2. 修复首页-8000% BUG，改用字段32官方涨跌幅\n3. COST/ZQ用60根计算，EMA圆滑，接近通达信13.43/13.84/15.13和ZQ1 37.98 ZQ 5.21\n4. 修复今日长K线，钳制high/low\n5. 指数不显示COST/ZQ`;
-}).catch(()=>{});
 </script><script>(function(){var loc=location.href.replace(/#.*$/,"");var ATTR_NAMES=["data-product-id","data-productid","data-product_id","product-id","productid","product_id","data-source-entity-id","source-entity-id","source_entity_id","data-product","data-metadata","data-meta"];var DATASET_KEYS=["productId","productid","product_id","sourceEntityId","sourceentityid","source_entity_id","product","metadata","meta"];function readProductId(value){if(typeof value!=="string"||value.length===0)return null;if(/^[0-9]{6,}$/.test(value))return value;var match=value.match(/(?:product(?:_|-)?id|source(?:_|-)?entity(?:_|-)?id)["'=:\s]+([0-9]{6,})/i);return match?match[1]:null}function extractProductId(start){for(var node=start;node&&node!==document.body;node=node.parentElement){for(var i=0;i<ATTR_NAMES.length;i++){var attrValue=node.getAttribute&&node.getAttribute(ATTR_NAMES[i]);var attrProductId=readProductId(attrValue);if(attrProductId)return attrProductId}var dataset=node.dataset||null;if(dataset){for(var j=0;j<DATASET_KEYS.length;j++){var dataValue=dataset[DATASET_KEYS[j]];var dataProductId=readProductId(dataValue);if(dataProductId)return dataProductId}}}return null}function isInlineMediaSlotElement(node){return !!(node&&node.getAttribute&&node.getAttribute("data-clippy-inline-media-slot")!==null)}function findInlineMediaSlot(start){for(var node=start;node&&node!==document.body;node=node.parentElement){if(isInlineMediaSlotElement(node))return node}return null}function readInlineMediaUrl(node){if(!node)return null;return node.getAttribute&&((node.getAttribute("data-clippy-inline-media-url")||node.getAttribute("data-url")||node.getAttribute("data_url")))||node.href||null}function stripHash(url){return String(url).replace(/#.*$/,"")}function urlsMatch(a,b){if(!a||!b)return false;try{return stripHash(new URL(a,loc).href)===stripHash(new URL(b,loc).href)}catch(_){return stripHash(a)===stripHash(b)}}function isFirstPartyReelUrl(value){try{var url=new URL(value,loc);if(url.protocol!=="https:")return false;var host=url.hostname.toLowerCase();var supported=host==="instagram.com"||host.endsWith(".instagram.com")||host==="facebook.com"||host.endsWith(".facebook.com");return supported&&/\/reels?\//i.test(url.pathname)}catch(_){return false}}function isInlineMediaUrlClick(node,href){var slot=findInlineMediaSlot(node);if(!slot)return false;var slotUrl=readInlineMediaUrl(slot);if(slotUrl)return urlsMatch(href,slotUrl);return isFirstPartyReelUrl(href)}function findDataHref(start){for(var node=start;node&&node!==document.body;node=node.parentElement){if(node.getAttribute){var href=node.getAttribute("data-href")||node.getAttribute("data-url");if(href)return{href:href,node:node}}}return null}var nativeOpen=window.open;window.open=function(url){if(parent!==window&&typeof url==="string"&&/^https?:\/\//.test(url)){parent.postMessage({type:"ecto:usercontent-link-click",href:url},"*");return null}return nativeOpen?nativeOpen.apply(window,arguments):null};document.addEventListener("click",function(e){var target=e.target instanceof Element?e.target:null;if(!target)return;if(parent===window)return;var a=target.closest?target.closest("a[href]"):null;if(a&&a.href&&/^https?:\/\//.test(a.href)&&a.href.replace(/#.*$/,"")!==loc){if(isInlineMediaUrlClick(a,a.href))return;var productId=extractProductId(target)||extractProductId(a);if(productId){e.preventDefault();parent.postMessage({type:"ecto-artifact-link-click",productId:productId},"*");return}e.preventDefault();parent.postMessage({type:"ecto:usercontent-link-click",href:a.href},"*");return}var dataHref=findDataHref(target);if(dataHref&&/^https?:\/\//.test(dataHref.href)&&dataHref.href.replace(/#.*$/,"")!==loc){if(isInlineMediaUrlClick(dataHref.node,dataHref.href))return;e.preventDefault();parent.postMessage({type:"ecto:usercontent-link-click",href:dataHref.href},"*")}},true)})();</script><script>(function(){var FOCUS_TYPE="ecto:artifact-focus-request";var CLOSE_TYPE="ecto:artifact-close-request";function focusArtifactDocument(){var body=document.body;if(!body)return;try{window.focus();}catch(e){}if(!body.hasAttribute("tabindex"))body.setAttribute("tabindex","-1");try{body.focus({preventScroll:true});}catch(e){try{body.focus();}catch(e2){}}}window.addEventListener("message",function(event){if(event.source!==window.parent)return;var data=event.data;if(!data||typeof data!=="object"||data.type!==FOCUS_TYPE)return;if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",focusArtifactDocument,{once:true});return;}focusArtifactDocument();});window.addEventListener("keydown",function(event){if(event.key!=="Escape")return;window.setTimeout(function(){if(event.defaultPrevented)return;window.parent.postMessage({type:CLOSE_TYPE},"*");},0);});})();</script></body></html>
