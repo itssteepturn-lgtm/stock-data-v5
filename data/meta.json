@@ -1,12 +1,12 @@
 {
-  "updated": "2026-09-24T07:01:42.699636",
+  "updated": "2026-09-24T11:26:21.059675",
   "count": 7407,
-  "shard": "1/2",
-  "range": "3704-7407",
-  "ok": 2706,
-  "fail": 56,
+  "shard": "0/1",
+  "range": "0-7407",
+  "ok": 5879,
+  "fail": 1121,
   "cleaned_fake": 0,
-  "saved_total": 5211,
+  "saved_total": 5790,
   "v": "V5.11 baostock fix ident",
   "note": "修复 Author identity unknown，已加git config，永不再aborted"
 }
