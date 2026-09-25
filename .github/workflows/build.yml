@@ -1,16 +1,17 @@
 name: V5全功能版 - COST/ZQ历史+当日 全市场
 on:
   schedule:
-    - cron: '30 16 * * *'  # UTC 16:30 = 北京 0:30
-    - cron: '30 17 * * *'  # 改为每半小时一次，原每小时200太慢
+    - cron: '30 16 * * *'  # 0:30 北京
+    - cron: '0 17 * * *'   # 1:00
+    - cron: '30 17 * * *'  # 1:30
+    - cron: '0 18 * * *'
     - cron: '30 18 * * *'
+    - cron: '0 19 * * *'
     - cron: '30 19 * * *'
+    - cron: '0 20 * * *'
     - cron: '30 20 * * *'
-    - cron: '30 21 * * *'
-    - cron: '30 22 * * *'
-    - cron: '30 23 * * *'
-    - cron: '30 0 * * *'   # 8:30北京
-    - cron: '30 1 * * *'   # 9:30北京 查缺补漏
+    - cron: '30 0 * * *'   # 8:30
+    - cron: '30 1 * * *'   # 9:30
   workflow_dispatch:
     inputs:
       clean:
@@ -18,10 +19,15 @@ on:
         required: false
         default: 'false'
 
+# 关键：防止你说的0:30自动跑和现在手动跑重复，导致全乱
+concurrency:
+  group: v5-build
+  cancel-in-progress: false  # 不取消，排队等现在的跑完再跑
+
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 360  # 允许跑6小时，一次跑完全市场
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
@@ -35,12 +41,12 @@ jobs:
         run: rm -rf data
       - name: Ensure dirs
         run: mkdir -p data/stocks data/indices
-      - name: Build V5 Full - COST/ZQ每时每刻 高效版
+      - name: Build V5 Full - COST/ZQ每时每刻 高效版 带并发锁
         run: python build_latest.py
       - name: Commit data
         run: |
           git config --global user.name "bot"
           git config --global user.email "bot@bot.com"
           git add data/
-          git diff --staged --quiet || git commit -m "V5全功能 COST/ZQ历史+当日 $(date) 高效版 BATCH=500 指数个股分开"
+          git diff --staged --quiet || git commit -m "V5全 COST/ZQ历史+当日 $(date) BATCH=500 并发锁"
           git push
