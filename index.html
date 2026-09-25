@@ -20,7 +20,7 @@
 :where(code, pre, kbd, samp) {
   font-family: "Optimistic Mono", ui-monospace, monospace;
 }
-</style><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>V9 修复COST/ZQ和实时标签</title><style>
+</style><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>V10 干净版-东财150天</title><style>
 body{margin:0;background:#0a0e14;color:#e8ecf2;font-family:-apple-system,system-ui}
 #app{max-width:430px;margin:0 auto;padding-bottom:80px}
 .card{margin:8px;border:1px solid #232f40;background:#141a24;border-radius:12px;overflow:hidden}
@@ -33,400 +33,177 @@ canvas{width:100%;background:#0a0e14;border-radius:8px;display:block}
 .detail{position:fixed;inset:0;background:#0a0e14;z-index:99;display:none;overflow:auto}
 .detail.open{display:block}
 .kbox{padding:8px}
-.loading{position:absolute;inset:0;background:rgba(10,14,20,0.85);display:flex;align-items:center;justify-content:center;font-size:13px;color:#8a94a6}
 </style></head><body>
 <div id="app">
-<div class="card"><div class="hd"><span>指数</span><span id="idx-time" style="font-size:10px;color:#8a94a6">--</span></div><div id="idx"></div></div>
-<div class="card"><div class="hd"><span>自选 · V9 修复COST/ZQ</span><span id="badge" class="badge">临时150天</span></div><div id="watch"></div><div style="padding:8px;display:flex;gap:8px"><input id="code" placeholder="300313" style="flex:1;background:#1c2532;border:1px solid #232f40;color:#fff;border-radius:8px;padding:9px"><button id="add" style="background:#3a8bff;color:#fff;border:0;border-radius:8px;padding:9px 14px;font-weight:700">添加</button></div></div>
-<div class="card"><div class="hd"><span>说明</span></div><div class="hint" id="log">加载中...</div></div>
+<div class="card"><div class="hd"><span>自选 · V10 干净版</span><span id="badge" class="badge">东财150天</span></div><div id="watch"></div><div style="padding:8px;display:flex;gap:8px"><input id="code" placeholder="300313" style="flex:1;background:#1c2532;border:1px solid #232f40;color:#fff;border-radius:8px;padding:9px"><button id="add" style="background:#3a8bff;color:#fff;border:0;border-radius:8px;padding:9px 14px;font-weight:700">查看</button></div></div>
+<div class="card"><div class="hd"><span>说明</span></div><div class="hint" id="log"></div></div>
 </div>
 <div class="detail" id="detail"><div style="padding:10px;display:flex;justify-content:space-between;position:sticky;top:0;background:#0a0e14;z-index:2"><span id="dtitle"></span><button id="closeBtn" style="background:#232f40;color:#fff;border:0;border-radius:8px;padding:6px 10px">关闭</button></div>
-<div class="kbox" style="position:relative"><div id="loadingMask" class="loading" style="display:none">计算中...</div><canvas id="mainC" style="height:380px"></canvas><canvas id="subC" style="height:140px;margin-top:8px"></canvas><div id="dinfo" class="hint"></div></div></div>
+<div class="kbox"><canvas id="mainC" style="height:400px"></canvas><canvas id="subC" style="height:150px;margin-top:8px"></canvas><div id="dinfo" class="hint"></div></div></div>
 <script>
 function secid(c){ c=String(c).padStart(6,'0'); if(c==='000001'||c==='000688'||c==='000300'||c==='000905') return '1.'+c; if(c.startsWith('60')||c.startsWith('68')) return '1.'+c; return '0.'+c; }
-function tencentPrefix(c){ c=String(c).padStart(6,'0'); if(c==='000001'||c==='000688') return 'sh'; if(c.startsWith('60')||c.startsWith('68')) return 'sh'; return 'sz'; }
-function limitPct(code){
-  code=String(code).padStart(6,'0');
-  if(code.startsWith('30')||code.startsWith('68')) return 0.20;
-  if(code.startsWith('8')||code.startsWith('4')||code.startsWith('92')) return 0.30;
-  return 0.10;
-}
-let watch=JSON.parse(localStorage.getItem('v5_watch')||'["300313","600519","000001","399006"]');
+let watch=JSON.parse(localStorage.getItem('v5_watch')||'["300313","600519","000001"]');
 
-function ensureIdx(){
-  const w=document.getElementById('idx'); if(w.children.length) return;
-  [
-    {code:'000001',name:'上证',secid:'1.000001'},
-    {code:'399001',name:'深证',secid:'0.399001'},
-    {code:'399006',name:'创业',secid:'0.399006'},
-    {code:'000688',name:'科创50',secid:'1.000688'},
-    {code:'899050',name:'北证50',secid:'0.899050'},
-  ].forEach(idx=>{
-    const r=document.createElement('div'); r.className='row'; r.id='ir_'+idx.code;
-    r.innerHTML=`<div><div style="font-weight:700">${idx.name} ${idx.code}</div><div id="ic_${idx.code}" style="font-size:11px;color:#8a94a6">--</div></div><div style="text-align:right"><div id="ip_${idx.code}" style="font-weight:700">--</div><div id="id_${idx.code}" style="font-size:11px">--</div></div>`;
-    w.appendChild(r); r.onclick=()=>openDetail(idx.code, true);
-  });
-}
 function ensureWatch(){
-  const w=document.getElementById('watch'); if(w.children.length===watch.length) return false;
-  w.innerHTML=''; watch.forEach(code=>{
-    const r=document.createElement('div'); r.className='row'; r.id='wr_'+code;
-    r.innerHTML=`<div><div style="font-weight:700">${code}</div><div id="ws_${code}" style="font-size:10px;color:#8a94a6"></div></div><div style="text-align:right"><div id="wp_${code}" style="font-weight:700">--</div><div id="wc_${code}" style="font-size:11px">--</div></div>`;
-    w.appendChild(r); r.onclick=()=>openDetail(code, false);
-  }); return true;
-}
-ensureIdx(); ensureWatch();
-
-async function fetchQtBatch(codes, isIdxList=false){
-  const qlist=codes.map(c=>{
-    const cc=String(c).padStart(6,'0');
-    if(isIdxList){
-      if(cc==='000001'||cc==='000688') return `sh${cc}`;
-      if(cc.startsWith('399')||cc==='899050') return `sz${cc}`;
-    }
-    return `${tencentPrefix(cc)}${cc}`;
-  });
-  const txt=await fetch(`https://qt.gtimg.cn/q=${qlist.join(',')}`).then(r=>r.text());
-  const map={};
-  txt.split(';').forEach(l=>{
-    const m=l.match(/v_(.+?)="(.+?)"/); if(!m) return;
-    const vs=m[2].split('~');
-    let price=parseFloat(vs[3]);
-    let prev=parseFloat(vs[4]);
-    let open=parseFloat(vs[5]), high=parseFloat(vs[33]), low=parseFloat(vs[34]);
-    let change, pct, vol=0, amount=0, turn=0;
-    // s_格式：vs[6]=vol, vs[7]=amount, vs[8]=turn%
-    if(vs[6] && !isNaN(parseFloat(vs[6])) && vs[8] && vs[8].includes('%')){
-      // s_格式
-      change=parseFloat(vs[4]);
-      pct=parseFloat(vs[5]);
-      if(vs[5] && vs[5].includes('%')) pct=parseFloat(vs[5]);
-      prev=price-change;
-      if(isNaN(pct)) pct=prev? change/prev*100:0;
-      if(isNaN(open)) open=prev||price;
-      vol=parseFloat(vs[6])||0;
-      amount=parseFloat(vs[7])||0;
-      const turnStr=vs[8];
-      if(turnStr && turnStr.includes('%')) turn=parseFloat(turnStr)/100;
-      else turn=parseFloat(turnStr)/100;
-    }else{
-      // 非s_格式
-      change=price-prev;
-      pct=prev? change/prev*100:0;
-      const pct2=parseFloat(vs[32]);
-      if(!isNaN(pct2) && Math.abs(pct2)<30) pct=pct2;
-      vol=parseFloat(vs[6])||0;
-      amount=parseFloat(vs[37])||0;
-      // turn在vs[38]或39
-      const t1=vs[38], t2=vs[39];
-      let turnStr=t1;
-      if(t1 && t1.includes('%')) turnStr=t1;
-      else if(t2 && t2.includes('%')) turnStr=t2;
-      if(turnStr && turnStr.includes('%')) turn=parseFloat(turnStr)/100;
-    }
-    if(isNaN(high)||high<=0) high=Math.max(price,open||price);
-    if(isNaN(low)||low<=0) low=Math.min(price,open||price);
-    const lim=0.35;
-    if(high>price*(1+lim)) high=Math.max(price,open||price);
-    if(low<price*(1-lim)) low=Math.min(price,open||price);
-    if(!isNaN(price)) map[m[1]]={price,prev,pct,open,high,low,change,vol,amount,turn};
-  });
-  return map;
-}
-async function fetchEastKlineTurn(code, count){
-  try{
-    const sid=secid(code);
-    const j=await fetch(`https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${sid}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt=101&fqt=1&beg=0&end=20500000&lmt=${count}`).then(r=>r.json());
-    const klines=j?.data?.klines;
-    if(!klines||!klines.length) return null;
-    return klines.map(s=>{
-      const v=s.split(',');
-      // f51 date, f52 open, f53 close, f54 high, f55 low, f56 vol, f57 amount, f61 turn%
-      return {
-        d:v[0], o:+v[1], c:+v[2], h:+v[3], l:+v[4], v:+v[5], a:+v[6], turn: v[10] ? +v[10]/100 : 0
-      };
-    });
-  }catch{ return null; }
-}
-
-let idxTimer=null, watchTimer=null;
-async function loadIdx(){
-  document.getElementById('idx-time').textContent=new Date().toLocaleTimeString();
-  const codes=['000001','399001','399006','000688','899050'];
-  const map=await fetchQtBatch(codes, true);
-  codes.forEach(code=>{
-    let found=null; for(const k in map){ if(k.includes(code)){ found=map[k]; break; } }
-    const pEl=document.getElementById('ip_'+code), dEl=document.getElementById('id_'+code), cEl=document.getElementById('ic_'+code);
-    if(found&&pEl&&found.price>0){
-      const up=found.change>=0;
-      pEl.textContent=found.price.toFixed(2); pEl.className=up?'up':'down';
-      dEl.textContent=(found.pct>0?'+':'')+found.pct.toFixed(2)+'%'; dEl.className=up?'up':'down';
-      cEl.textContent=`昨${found.prev.toFixed(2)} 换手${(found.turn*100).toFixed(2)}%`;
-    }
+  const w=document.getElementById('watch'); w.innerHTML='';
+  watch.forEach(code=>{
+    const r=document.createElement('div'); r.className='row';
+    r.innerHTML=`<div style="font-weight:700">${code}</div><div style="font-size:11px;color:#8a94a6">点击查看干净版COST/ZQ</div>`;
+    w.appendChild(r); r.onclick=()=>openDetail(code);
   });
 }
-async function loadWatch(){
-  if(ensureWatch()) return;
-  try{
-    const map=await fetchQtBatch(watch, false);
-    watch.forEach(code=>{
-      let found=null; for(const k in map){ if(k.includes(code)){ found=map[k]; break; } }
-      const pEl=document.getElementById('wp_'+code), cEl=document.getElementById('wc_'+code), sEl=document.getElementById('ws_'+code);
-      if(found&&pEl){
-        const up=found.change>=0;
-        pEl.textContent=found.price.toFixed(2); pEl.className=up?'up':'down';
-        cEl.textContent=(found.pct>0?'+':'')+found.pct.toFixed(2)+'% 换手'+(found.turn*100).toFixed(2)+'%'; cEl.className=up?'up':'down';
-        if(sEl) sEl.textContent=`量${(found.vol/10000).toFixed(1)}万`;
-      }
-    });
-  }catch{}
-}
-function startTimers(){
-  if(idxTimer) clearInterval(idxTimer);
-  if(watchTimer) clearInterval(watchTimer);
-  loadIdx(); loadWatch();
-  idxTimer=setInterval(loadIdx, 30000);
-  watchTimer=setInterval(loadWatch, 3000);
-}
-startTimers();
+ensureWatch();
 
-// ===== 全临时150天，修复turn和实时标签 =====
-async function getTencentKline(code, count, isIdx){
-  try{
-    const pref=isIdx? (code==='000001'||code==='000688'?'sh':'sz') : tencentPrefix(code);
-    const param=`${pref}${String(code).padStart(6,'0')},day,,,${count},qfq`;
-    const j=await fetch(`https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${param}`).then(r=>r.json());
-    const key=`${pref}${String(code).padStart(6,'0')}`;
-    const data=j.data?.[key];
-    const klines=data?.qfqday || data?.day || [];
-    if(!klines.length) return [];
-    return klines.map(k=>({d:k[0], o:+k[1], c:+k[2], h:+k[3], l:+k[4], v:+k[5]*100, a:0, turn:0}));
-  }catch{ return []; }
-}
-
-async function getFullBarsTemp(code, isIdx){
-  let bars=await fetchEastKlineTurn(code, 150);
-  if(!bars || bars.length<60){
-    const tk=await getTencentKline(code, 150, isIdx);
-    if(tk.length>60) bars=tk;
-  }
-  if(!bars || bars.length<20) return {calcBars:[], displayBars:[], note:'临时数据拉取失败'};
-  const vols=bars.map(b=>b.v||0);
-  const avgVol=vols.reduce((a,b)=>a+b,0)/vols.length||1;
-  bars=bars.map(b=>{
-    let turn=b.turn;
-    if(!turn || turn<=0){
-      let t=b.v/(avgVol*100);
-      if(!isFinite(t)||t<=0) t=0.008;
-      turn=Math.min(Math.max(t,0.001),0.25);
-    }
-    return {...b, turn};
-  });
-  // 今日实时：用腾讯的真实turn和价格，替换最后一根，而不是额外加一根带“实时”二字
-  let qt=null;
-  try{
-    const qmap=await fetchQtBatch([code], isIdx);
-    for(const k in qmap){ if(k.includes(code)){ qt=qmap[k]; break; } }
-  }catch{}
-  if(qt){
-    const lim=limitPct(code);
-    let h=qt.high, l=qt.low, o=qt.open, c=qt.price;
-    if(h>c*(1+lim*1.1)) h=Math.max(o,c);
-    if(l<c*(1-lim*1.1)) l=Math.min(o,c);
-    // 如果今天已经在k线里，替换它；否则追加
-    const lastDate=bars[bars.length-1].d;
-    const todayStr=new Date().toISOString().slice(0,10);
-    // 简单判断：如果最后一天不是今天，就追加今天
-    // 东财k线不含今日，所以追加
-    const todayBar={
-      d: todayStr,
-      o, h, l, c,
-      v: qt.vol||0,
-      a: qt.amount||0,
-      turn: qt.turn && qt.turn>0 ? qt.turn : (bars[bars.length-1].turn||0.01),
-      avgPrice: qt.amount && qt.vol ? qt.amount/qt.vol : c
+async function fetchEastKline(code, count){
+  const sid=secid(code);
+  const url=`https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${sid}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt=101&fqt=1&beg=0&end=20500000&lmt=${count}`;
+  const j=await fetch(url).then(r=>r.json());
+  const klines=j?.data?.klines;
+  if(!klines) return [];
+  return klines.map(s=>{
+    const v=s.split(',');
+    // f51日期 f52开 f53收 f54高 f55低 f56量(手) f57额 f61换手%
+    return {
+      d:v[0], o:+v[1], c:+v[2], h:+v[3], l:+v[4], v:+v[5], a:+v[6], turn: v[10] ? +v[10]/100 : 0,
+      avg: (parseFloat(v[3])+parseFloat(v[4])+parseFloat(v[2]))/3
     };
-    // 检查是否今天已存在（日期相同）
-    if(lastDate===todayStr){
-      bars[bars.length-1]=todayBar;
-    }else{
-      bars.push(todayBar);
-    }
-  }
-  const calcBars=bars.slice(-150);
-  const displayBars=bars.slice(-60);
-  const lastTurn=calcBars[calcBars.length-1]?.turn||0;
-  return {calcBars, displayBars, note:`全临时150天，价格区间150天min-max切300格，今日turn=${(lastTurn*100).toFixed(2)}% 来自腾讯，和通达信8.31%对比`};
+  });
 }
 
-function buildChipDistribution(bars){
+function build(bars){
   const n=bars.length;
-  if(n===0) return null;
-  let minPrice=Math.min(...bars.map(b=>b.l).filter(x=>x>0));
-  let maxPrice=Math.max(...bars.map(b=>b.h));
-  if(!isFinite(minPrice)||minPrice<=0) minPrice=Math.min(...bars.map(b=>b.c))*0.8;
-  if(maxPrice<=minPrice) maxPrice=minPrice*1.2;
+  let minP=Math.min(...bars.map(b=>b.l));
+  let maxP=Math.max(...bars.map(b=>b.h));
   const GRID=300;
-  const step=(maxPrice-minPrice)/GRID|| (maxPrice*0.001);
+  const step=(maxP-minP)/GRID;
   let dist=new Array(GRID).fill(0);
-  function getTurn(b){
-    if(b.turn && b.turn>0 && b.turn<0.5) return Math.min(Math.max(b.turn,0.0005),0.3);
-    return 0.01;
-  }
-  function getAvgPrice(b){
-    if(b.avgPrice && b.avgPrice>0) return b.avgPrice;
-    if(b.a && b.v) return b.a/b.v;
-    return (b.h+b.l+b.c)/3;
-  }
-  const cost50Arr=new Array(n).fill(0), cost75Arr=new Array(n).fill(0), cost90Arr=new Array(n).fill(0);
-  const zqArr=new Array(n).fill(0), zq1Arr=new Array(n).fill(0);
-  const vwmaArr=new Array(n).fill(0);
+  const cost50=new Array(n), cost75=new Array(n), cost90=new Array(n), zq=new Array(n), zq1=new Array(n), vwma=new Array(n);
   for(let i=0;i<n;i++){
     let sumCV=0,sumV=0;
-    for(let k=Math.max(0,i-9);k<=i;k++){sumCV+=bars[k].c*bars[k].v; sumV+=bars[k].v;}
-    vwmaArr[i]=sumV?sumCV/sumV:bars[i].c;
+    for(let k=Math.max(0,i-9);k<=i;k++){ sumCV+=bars[k].c*bars[k].v; sumV+=bars[k].v; }
+    vwma[i]=sumV?sumCV/sumV:bars[i].c;
   }
   for(let i=0;i<n;i++){
     const b=bars[i];
-    const turn=getTurn(b);
-    const avgPrice=getAvgPrice(b);
+    let turn=b.turn;
+    if(!turn||turn<=0) turn=0.01;
+    turn=Math.min(Math.max(turn,0.001),0.3);
     for(let g=0;g<GRID;g++) dist[g]*=(1-turn);
-    const low=b.l, high=b.h;
-    if(low>0 && high>0 && high>=low){
-      const lowIdx=Math.max(0, Math.floor((low-minPrice)/step));
-      const highIdx=Math.min(GRID-1, Math.floor((high-minPrice)/step));
-      let avgIdx=Math.floor((avgPrice-minPrice)/step);
-      avgIdx=Math.max(lowIdx, Math.min(highIdx, avgIdx));
-      let weights=[];
-      for(let g=lowIdx; g<=highIdx; g++){
-        let w;
-        if(highIdx===lowIdx) w=1;
-        else if(g<=avgIdx){
-          const denom=(avgIdx-lowIdx)||1;
-          w=(g-lowIdx)/denom;
-        }else{
-          const denom=(highIdx-avgIdx)||1;
-          w=(highIdx-g)/denom;
-        }
-        weights.push(Math.max(0,w));
+    const low=b.l, high=b.h, avg=b.avg||b.c;
+    const lowIdx=Math.max(0, Math.min(GRID-1, Math.floor((low-minP)/step)));
+    const highIdx=Math.max(0, Math.min(GRID-1, Math.floor((high-minP)/step)));
+    let avgIdx=Math.floor((avg-minP)/step);
+    avgIdx=Math.max(lowIdx, Math.min(highIdx, avgIdx));
+    let weights=[];
+    for(let g=lowIdx; g<=highIdx; g++){
+      let w=1;
+      if(highIdx===lowIdx) w=1;
+      else if(g<=avgIdx){
+        const d=avgIdx-lowIdx||1;
+        w=(g-lowIdx)/d;
+        if(avgIdx===lowIdx) w=1;
+      }else{
+        const d=highIdx-avgIdx||1;
+        w=(highIdx-g)/d;
+        if(highIdx===avgIdx) w=1;
       }
-      const sumW=weights.reduce((a,b)=>a+b,0)||1;
-      for(let j=0;j<weights.length;j++){
-        const g=lowIdx+j;
-        dist[g]+=weights[j]/sumW*turn;
-      }
+      weights.push(Math.max(0,w));
+    }
+    // 三角形至少保证峰值有权重
+    if(weights.length>0 && weights.every(w=>w===0)) weights=weights.map(()=>1);
+    const sumW=weights.reduce((a,b)=>a+b,0)||1;
+    for(let j=0;j<weights.length;j++){
+      dist[lowIdx+j]+=weights[j]/sumW*turn;
     }
     const total=dist.reduce((a,b)=>a+b,0)||1;
-    let cum=0, c50=0,c75=0,c90=0;
+    let cum=0,c50=0,c75=0,c90=0;
     for(let g=0;g<GRID;g++){
       cum+=dist[g];
-      const price=minPrice+g*step;
-      if(c50===0 && cum/total>=0.5) c50=price;
-      if(c75===0 && cum/total>=0.75) c75=price;
-      if(c90===0 && cum/total>=0.9) c90=price;
+      const price=minP+g*step;
+      if(!c50 && cum/total>=0.5) c50=price;
+      if(!c75 && cum/total>=0.75) c75=price;
+      if(!c90 && cum/total>=0.9) c90=price;
     }
-    cost50Arr[i]=c50||bars[i].c;
-    cost75Arr[i]=c75||bars[i].c;
-    cost90Arr[i]=c90||bars[i].c;
+    cost50[i]=c50||b.c; cost75[i]=c75||b.c; cost90[i]=c90||b.c;
     function winner(price){
       let win=0;
       for(let g=0;g<GRID;g++){
-        const p=minPrice+g*step;
+        const p=minP+g*step;
         if(p<=price) win+=dist[g];
       }
       return win/total*100;
     }
-    // ZQ用当日均价，ZQ1用10日VWMA，均按你给的思路
-    zqArr[i]=winner(getAvgPrice(b));
-    zq1Arr[i]=winner(vwmaArr[i]);
+    zq[i]=winner(b.avg);
+    zq1[i]=winner(vwma[i]);
   }
-  return {cost50:cost50Arr, cost75:cost75Arr, cost90:cost90Arr, zq:zqArr, zq1:zq1Arr, vwma:vwmaArr, minPrice, maxPrice, dist};
+  return {cost50,cost75,cost90,zq,zq1,vwma,minP,maxP,dist};
 }
 
 function setup(c){ const dpr=window.devicePixelRatio||1; const w=c.clientWidth, h=c.clientHeight; c.width=w*dpr; c.height=h*dpr; const ctx=c.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,w,h); return {ctx,w,h}; }
-let currentCode=null, currentIsIdx=false;
-async function openDetail(code, isIdx){
-  currentCode=code; currentIsIdx=isIdx;
-  const detail=document.getElementById('detail');
-  const mask=document.getElementById('loadingMask');
-  detail.classList.add('open'); mask.style.display='flex';
-  document.getElementById('dtitle').textContent=code+' · 150天筹码计算中...';
-  setup(document.getElementById('mainC')); setup(document.getElementById('subC'));
-  document.getElementById('dinfo').textContent='全临时150天，300格三角分布计算中...';
-  const {calcBars, displayBars, note}=await getFullBarsTemp(code, isIdx);
-  if(currentCode!==code) return;
-  if(!calcBars.length){ document.getElementById('dinfo').textContent='临时数据拉取失败'; mask.style.display='none'; return; }
-  const fullResult=buildChipDistribution(calcBars);
-  if(!fullResult){ document.getElementById('dinfo').textContent='计算失败'; mask.style.display='none'; return; }
-  const offset=calcBars.length-displayBars.length;
+
+async function openDetail(code){
+  document.getElementById('detail').classList.add('open');
+  document.getElementById('dtitle').textContent=code+' · 计算中...';
+  const {ctx,w,h}=setup(document.getElementById('mainC'));
+  const {ctx:ctx2,w:w2,h:h2}=setup(document.getElementById('subC'));
+  const bars=await fetchEastKline(code,150);
+  if(bars.length<20){ document.getElementById('dinfo').textContent='拉取失败'; return; }
+  const res=build(bars);
+  const displayBars=bars.slice(-60);
+  const offset=bars.length-displayBars.length;
   const inds={
-    cost50:fullResult.cost50.slice(offset),
-    cost75:fullResult.cost75.slice(offset),
-    cost90:fullResult.cost90.slice(offset),
-    zq:fullResult.zq.slice(offset),
-    zq1:fullResult.zq1.slice(offset),
+    cost50:res.cost50.slice(offset),
+    cost75:res.cost75.slice(offset),
+    cost90:res.cost90.slice(offset),
+    zq:res.zq.slice(offset),
+    zq1:res.zq1.slice(offset),
   };
-  mask.style.display='none';
-  document.getElementById('dtitle').textContent=code+ (isIdx?' · 指数':' · 150天筹码·全临时');
-  let infoHtml=`<div>${note}</div><div>共${displayBars.length}根显示，最新 ${displayBars[displayBars.length-1].c.toFixed(2)} 今日turn=${(displayBars[displayBars.length-1].turn*100).toFixed(2)}% 和通达信8.31%对比</div>`;
-  if(!isIdx){
-    infoHtml+=`<div>COST50 ${inds.cost50[inds.cost50.length-1].toFixed(2)} COST75 ${inds.cost75[inds.cost75.length-1].toFixed(2)} COST90 ${inds.cost90[inds.cost90.length-1].toFixed(2)} <span style="color:#ff3b3b">←对比通达信 13.43/13.84/15.13</span></div><div>ZQ ${inds.zq[inds.zq.length-1].toFixed(1)} ZQ1 ${inds.zq1[inds.zq1.length-1].toFixed(1)} <span style="color:#ffcc00">←对比通达信 ZQ1:37.98 ZQ:5.21，均价=${(displayBars[displayBars.length-1].avgPrice||displayBars[displayBars.length-1].c).toFixed(2)}</span></div>`;
-    drawK(displayBars, inds, false, code);
-  }else{
-    infoHtml+=`<div style="color:#8a94a6">指数不计算COST/ZQ</div>`;
-    drawK(displayBars, null, true, code);
-  }
-  document.getElementById('dinfo').innerHTML=infoHtml;
-}
-function drawK(bars, inds, isIdx, code){
-  const mainC=document.getElementById('mainC'), subC=document.getElementById('subC');
-  const {ctx,w,h}=setup(mainC); const {ctx:ctx2,w:w2,h:h2}=setup(subC);
+  document.getElementById('dtitle').textContent=`${code} · ${displayBars[0].d}~${displayBars[displayBars.length-1].d} 共${displayBars.length}根`;
+  const last=displayBars[displayBars.length-1];
+  const lastIdx=inds.cost50.length-1;
+  document.getElementById('dinfo').innerHTML=`最后交易日 ${last.d} 收${last.c} 换手${(last.turn*100).toFixed(2)}% 均价${last.avg.toFixed(2)}\nCOST50 ${inds.cost50[lastIdx].toFixed(2)} COST75 ${inds.cost75[lastIdx].toFixed(2)} COST90 ${inds.cost90[lastIdx].toFixed(2)} ← 对比通达信 13.43/13.84/15.13\nZQ ${inds.zq[lastIdx].toFixed(2)} ZQ1 ${inds.zq1[lastIdx].toFixed(2)} ← 对比通达信 5.21/37.98\n价格区间 ${res.minP.toFixed(2)}~${res.maxP.toFixed(2)} 切300格，三角分布，峰值=均价(H+L+C)/3`;
+
+  // 画K
   const padX=14, padY=h*0.12;
-  const min=Math.min(...bars.map(b=>b.l).filter(x=>x>0)), max=Math.max(...bars.map(b=>b.h));
-  const range=(max-min)||1;
+  const min=Math.min(...displayBars.map(b=>b.l)), max=Math.max(...displayBars.map(b=>b.h));
+  const range=max-min||1;
   const yMin=min-range*0.05, yMax=max+range*0.15;
-  const y=v=>h-padY-(v-yMin)/(yMax-yMin||1)*(h-padY*2);
-  const x=i=>padX + i/(bars.length-1||1)*(w-padX*2);
+  const y=v=>h-padY-(v-yMin)/(yMax-yMin)*(h-padY*2);
+  const x=i=>padX + i/(displayBars.length-1)*(w-padX*2);
   ctx.fillStyle='#0a0e14'; ctx.fillRect(0,0,w,h);
-  ctx2.fillStyle='#0a0e14'; ctx2.fillRect(0,0,w2,h2);
-  const bw=Math.max(4, (w-padX*2)/bars.length*0.5);
-  bars.forEach((b,i)=>{
+  const bw=Math.max(4, (w-padX*2)/displayBars.length*0.5);
+  displayBars.forEach((b,i)=>{
     const xx=x(i); const up=b.c>=b.o; ctx.fillStyle=up?'#ff3b3b':'#00c873'; ctx.strokeStyle=ctx.fillStyle;
-    const yO=y(b.o), yC=y(b.c), yH=y(b.h), yL=y(b.l);
-    ctx.beginPath(); ctx.moveTo(xx,yH); ctx.lineTo(xx,yL); ctx.lineWidth=1; ctx.stroke();
-    const top=Math.min(yO,yC), hh=Math.max(2, Math.abs(yO-yC));
+    ctx.beginPath(); ctx.moveTo(xx,y(b.h)); ctx.lineTo(xx,y(b.l)); ctx.lineWidth=1; ctx.stroke();
+    const yo=y(b.o), yc=y(b.c); const top=Math.min(yo,yc), hh=Math.max(2,Math.abs(yo-yc));
     ctx.fillRect(xx-bw/2, top, bw, hh);
   });
-  if(!isIdx && inds){
-    function drawLine(arr,color){
-      ctx.beginPath(); ctx.strokeStyle=color; ctx.lineWidth=1.4;
-      arr.forEach((v,i)=>{const xx=x(i), yy=y(v); if(i==0) ctx.moveTo(xx,yy); else ctx.lineTo(xx,yy);}); ctx.stroke();
-    }
-    drawLine(inds.cost50,'#2ecc71');
-    drawLine(inds.cost75,'#ffcc00');
-    drawLine(inds.cost90,'#ff4d4d');
-    const zy=v=>h2-10-v/100*(h2-20);
-    const zx=i=>padX + i/(bars.length-1||1)*(w2-padX*2);
-    ctx2.save(); ctx2.strokeStyle='rgba(255,255,255,0.15)'; ctx2.setLineDash([3,3]); ctx2.beginPath(); ctx2.moveTo(0,zy(50)); ctx2.lineTo(w2,zy(50)); ctx2.stroke(); ctx2.setLineDash([]); ctx2.restore();
-    function drawSub(arr,color){
-      ctx2.beginPath(); ctx2.strokeStyle=color; ctx2.lineWidth=1.3;
-      arr.forEach((v,i)=>{const xx=zx(i), yy=zy(v); if(i==0) ctx2.moveTo(xx,yy); else ctx2.lineTo(xx,yy);}); ctx2.stroke();
-    }
-    drawSub(inds.zq,'#a855f7');
-    drawSub(inds.zq1,'#3b82f6');
-  }else{
-    const ma=(p)=>{ const r=[]; for(let i=0;i<bars.length;i++){ let s=0,c=0; for(let k=Math.max(0,i-p+1);k<=i;k++){s+=bars[k].c;c++;} r.push(s/c);} return r; };
-    const ma5=ma(5), ma10=ma(10);
-    ctx.beginPath(); ma5.forEach((v,i)=>{const xx=x(i); if(i==0) ctx.moveTo(xx,y(v)); else ctx.lineTo(xx,y(v));}); ctx.strokeStyle='#ffcc00'; ctx.lineWidth=1; ctx.stroke();
-    ctx.beginPath(); ma10.forEach((v,i)=>{const xx=x(i); if(i==0) ctx.moveTo(xx,y(v)); else ctx.lineTo(xx,y(v));}); ctx.strokeStyle='#3a8bff'; ctx.stroke();
+  function drawLine(arr,color){
+    ctx.beginPath(); ctx.strokeStyle=color; ctx.lineWidth=1.5;
+    arr.forEach((v,i)=>{ const xx=x(i), yy=y(v); if(i===0) ctx.moveTo(xx,yy); else ctx.lineTo(xx,yy); }); ctx.stroke();
   }
+  drawLine(inds.cost50,'#2ecc71');
+  drawLine(inds.cost75,'#ffcc00');
+  drawLine(inds.cost90,'#ff4d4d');
+
+  // 副图
+  ctx2.fillStyle='#0a0e14'; ctx2.fillRect(0,0,w2,h2);
+  const zy=v=>h2-10-v/100*(h2-20);
+  const zx=i=>padX + i/(displayBars.length-1)*(w2-padX*2);
+  ctx2.save(); ctx2.strokeStyle='rgba(255,255,255,0.15)'; ctx2.setLineDash([3,3]); ctx2.beginPath(); ctx2.moveTo(0,zy(50)); ctx2.lineTo(w2,zy(50)); ctx2.stroke(); ctx2.setLineDash([]); ctx2.restore();
+  function drawSub(arr,color){
+    ctx2.beginPath(); ctx2.strokeStyle=color; ctx2.lineWidth=1.5;
+    arr.forEach((v,i)=>{ const xx=zx(i), yy=zy(v); if(i===0) ctx2.moveTo(xx,yy); else ctx2.lineTo(xx,yy); }); ctx2.stroke();
+  }
+  drawSub(inds.zq,'#a855f7');
+  drawSub(inds.zq1,'#3b82f6');
 }
-document.getElementById('closeBtn').onclick=()=>{ currentCode=null; document.getElementById('detail').classList.remove('open'); };
-document.getElementById('log').textContent=`V9修复版：\n1. 修复turn：之前东财f168拿到0.77%是错的，通达信是8.31%，现在用腾讯s_格式vs[8]的8.31%真实turn\n2. 修复ZQ：之前ZQ用close，ZQ1用VWMA但都是close，所以都是21.2，现在ZQ用当日均价amount/vol，ZQ1用10日VWMA，分开了\n3. 去掉“实时”二字：今日不再额外加一根带“实时”标签的K线，而是替换最后一根为今日，指标线画到正常K线上\n4. 最后两根K线：之前追加导致两根都是12.37，现在判断日期，替换今天，不会两根一样\n5. 全临时150天，价格区间150天min-max切300格`;
-document.getElementById('badge').textContent=`V9修复turn和实时标签`;
+
+document.getElementById('closeBtn').onclick=()=>document.getElementById('detail').classList.remove('open');
+document.getElementById('log').textContent=`V10干净版逻辑：\n1. 全东财kline接口 f61换手率，今日休市也返回昨天8.31%，不会0\n2. 均价=(H+L+C)/3，不用amount/vol，不会0.13\n3. 150天 min-max切300格，旧*(1-turn) 新turn三角撒 峰值均价\n4. ZQ=WINNER(当日均价) ZQ1=WINNER(10日VWMA)\n5. 显示60天，不加实时二字，指标线画到正常K线\n先看300313 COST50是否 13.43附近，ZQ 5.21/37.98是否分开`;
 document.getElementById('add').onclick=()=>{
   let c=document.getElementById('code').value.replace(/\D/g,'').padStart(6,'0');
-  if(!/^\d{6}$/.test(c)) return alert('6位');
-  watch=watch.filter(x=>x!==c); watch.unshift(c); localStorage.setItem('v5_watch',JSON.stringify(watch)); ensureWatch(); loadWatch(); document.getElementById('code').value='';
+  if(!/^\d{6}$/.test(c)) return;
+  watch=watch.filter(x=>x!==c); watch.unshift(c); localStorage.setItem('v5_watch',JSON.stringify(watch)); ensureWatch(); openDetail(c);
 };
 </script><script>(function(){var loc=location.href.replace(/#.*$/,"");var ATTR_NAMES=["data-product-id","data-productid","data-product_id","product-id","productid","product_id","data-source-entity-id","source-entity-id","source_entity_id","data-product","data-metadata","data-meta"];var DATASET_KEYS=["productId","productid","product_id","sourceEntityId","sourceentityid","source_entity_id","product","metadata","meta"];function readProductId(value){if(typeof value!=="string"||value.length===0)return null;if(/^[0-9]{6,}$/.test(value))return value;var match=value.match(/(?:product(?:_|-)?id|source(?:_|-)?entity(?:_|-)?id)["'=:\s]+([0-9]{6,})/i);return match?match[1]:null}function extractProductId(start){for(var node=start;node&&node!==document.body;node=node.parentElement){for(var i=0;i<ATTR_NAMES.length;i++){var attrValue=node.getAttribute&&node.getAttribute(ATTR_NAMES[i]);var attrProductId=readProductId(attrValue);if(attrProductId)return attrProductId}var dataset=node.dataset||null;if(dataset){for(var j=0;j<DATASET_KEYS.length;j++){var dataValue=dataset[DATASET_KEYS[j]];var dataProductId=readProductId(dataValue);if(dataProductId)return dataProductId}}}return null}function isInlineMediaSlotElement(node){return !!(node&&node.getAttribute&&node.getAttribute("data-clippy-inline-media-slot")!==null)}function findInlineMediaSlot(start){for(var node=start;node&&node!==document.body;node=node.parentElement){if(isInlineMediaSlotElement(node))return node}return null}function readInlineMediaUrl(node){if(!node)return null;return node.getAttribute&&((node.getAttribute("data-clippy-inline-media-url")||node.getAttribute("data-url")||node.getAttribute("data_url")))||node.href||null}function stripHash(url){return String(url).replace(/#.*$/,"")}function urlsMatch(a,b){if(!a||!b)return false;try{return stripHash(new URL(a,loc).href)===stripHash(new URL(b,loc).href)}catch(_){return stripHash(a)===stripHash(b)}}function isFirstPartyReelUrl(value){try{var url=new URL(value,loc);if(url.protocol!=="https:")return false;var host=url.hostname.toLowerCase();var supported=host==="instagram.com"||host.endsWith(".instagram.com")||host==="facebook.com"||host.endsWith(".facebook.com");return supported&&/\/reels?\//i.test(url.pathname)}catch(_){return false}}function isInlineMediaUrlClick(node,href){var slot=findInlineMediaSlot(node);if(!slot)return false;var slotUrl=readInlineMediaUrl(slot);if(slotUrl)return urlsMatch(href,slotUrl);return isFirstPartyReelUrl(href)}function findDataHref(start){for(var node=start;node&&node!==document.body;node=node.parentElement){if(node.getAttribute){var href=node.getAttribute("data-href")||node.getAttribute("data-url");if(href)return{href:href,node:node}}}return null}var nativeOpen=window.open;window.open=function(url){if(parent!==window&&typeof url==="string"&&/^https?:\/\//.test(url)){parent.postMessage({type:"ecto:usercontent-link-click",href:url},"*");return null}return nativeOpen?nativeOpen.apply(window,arguments):null};document.addEventListener("click",function(e){var target=e.target instanceof Element?e.target:null;if(!target)return;if(parent===window)return;var a=target.closest?target.closest("a[href]"):null;if(a&&a.href&&/^https?:\/\//.test(a.href)&&a.href.replace(/#.*$/,"")!==loc){if(isInlineMediaUrlClick(a,a.href))return;var productId=extractProductId(target)||extractProductId(a);if(productId){e.preventDefault();parent.postMessage({type:"ecto-artifact-link-click",productId:productId},"*");return}e.preventDefault();parent.postMessage({type:"ecto:usercontent-link-click",href:a.href},"*");return}var dataHref=findDataHref(target);if(dataHref&&/^https?:\/\//.test(dataHref.href)&&dataHref.href.replace(/#.*$/,"")!==loc){if(isInlineMediaUrlClick(dataHref.node,dataHref.href))return;e.preventDefault();parent.postMessage({type:"ecto:usercontent-link-click",href:dataHref.href},"*")}},true)})();</script><script>(function(){var FOCUS_TYPE="ecto:artifact-focus-request";var CLOSE_TYPE="ecto:artifact-close-request";function focusArtifactDocument(){var body=document.body;if(!body)return;try{window.focus();}catch(e){}if(!body.hasAttribute("tabindex"))body.setAttribute("tabindex","-1");try{body.focus({preventScroll:true});}catch(e){try{body.focus();}catch(e2){}}}window.addEventListener("message",function(event){if(event.source!==window.parent)return;var data=event.data;if(!data||typeof data!=="object"||data.type!==FOCUS_TYPE)return;if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",focusArtifactDocument,{once:true});return;}focusArtifactDocument();});window.addEventListener("keydown",function(event){if(event.key!=="Escape")return;window.setTimeout(function(){if(event.defaultPrevented)return;window.parent.postMessage({type:CLOSE_TYPE},"*");},0);});})();</script></body></html>
