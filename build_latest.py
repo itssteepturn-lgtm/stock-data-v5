@@ -80,7 +80,7 @@ def build_chip(bars):
     return dict(cost50=cost50,cost75=cost75,cost90=cost90,zq=zq,zq1=zq1,vwma=vwma,minP=minP,maxP=maxP,dist=dist)
 
 def get_codes():
-    # 带重试和日志，解决你截图里 股票0 指数0 的问题
+    # 修复版：baostock 6列是 code, name, ipo, out, type, status
     import json
     stocks=[]; indices=[]
     for attempt in range(3):
@@ -90,31 +90,56 @@ def get_codes():
             rs=bs.query_stock_basic()
             print(f'query_stock_basic error_code={rs.error_code} msg={rs.error_msg}')
             cnt=0
+            sample_printed=0
             while rs.error_code=='0' and rs.next():
                 row=rs.get_row_data()
                 cnt+=1
-                if len(row)<5: continue
-                code_full=row[0]  # sh.600000
+                # 调试：打印前3行看列结构
+                if sample_printed<3:
+                    print(f'示例行{cnt}: {row}')
+                    sample_printed+=1
+                if len(row)<6:
+                    continue
+                # 正确列：row[0]=sh.600000, row[1]=名称, row[2]=ipo, row[3]=out, row[4]=type, row[5]=status
+                code_full=row[0]
                 try:
                     code=code_full.split('.')[1]
                 except:
                     continue
-                type_=row[3] if len(row)>3 else '1'
-                status=row[4] if len(row)>4 else '1'
+                type_=row[4] if len(row)>4 else ''
+                status=row[5] if len(row)>5 else '1'
+                # type 1=股票 2=指数
                 if type_=='1' and status=='1':
                     stocks.append(code)
                 elif type_=='2':
+                    # 指数不管是否退市都保留，方便前台显示
                     indices.append(code)
             print(f'本次取到 股票{len(stocks)} 指数{len(indices)} 遍历行{cnt}')
             bs.logout()
-            if stocks:
-                # 缓存股票列表，下次baostock挂了也能用
+            if stocks or indices:
                 os.makedirs('data', exist_ok=True)
                 try:
-                    with open('data/stocks_list.json','w') as f:
-                        json.dump(dict(stocks=stocks, indices=indices, updated=datetime.now().isoformat()), f)
+                    with open('data/stocks_list.json','w') as jf:
+                        json.dump(dict(stocks=stocks, indices=indices, updated=datetime.now().isoformat()), jf)
                 except: pass
                 return stocks, indices
+        except Exception as e:
+            print(f'get_codes 异常 {e} attempt {attempt}')
+            import traceback; traceback.print_exc()
+            try: bs.logout()
+            except: pass
+        time.sleep(2)
+    # 缓存兜底
+    try:
+        if os.path.exists('data/stocks_list.json'):
+            with open('data/stocks_list.json') as f:
+                j=json.load(f)
+                print(f'使用缓存 stocks_list.json 股票{len(j.get("stocks",[]))} 指数{len(j.get("indices",[]))}')
+                return j.get('stocks',[]), j.get('indices',[])
+    except Exception as e:
+        print(f'读缓存失败 {e}')
+    print('get_codes 最终返回0，可能是解析仍有问题')
+    return stocks, indices
         except Exception as e:
             print(f'get_codes 异常 {e} attempt {attempt}')
             try: bs.logout()
