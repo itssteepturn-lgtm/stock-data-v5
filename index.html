@@ -20,7 +20,7 @@
 :where(code, pre, kbd, samp) {
   font-family: "Optimistic Mono", ui-monospace, monospace;
 }
-</style><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>V7 筹码分布-盘中实时陡升版</title><style>
+</style><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>V8 调试版-全临时150天</title><style>
 body{margin:0;background:#0a0e14;color:#e8ecf2;font-family:-apple-system,system-ui}
 #app{max-width:430px;margin:0 auto;padding-bottom:80px}
 .card{margin:8px;border:1px solid #232f40;background:#141a24;border-radius:12px;overflow:hidden}
@@ -36,16 +36,13 @@ canvas{width:100%;background:#0a0e14;border-radius:8px;display:block}
 .loading{position:absolute;inset:0;background:rgba(10,14,20,0.85);display:flex;align-items:center;justify-content:center;font-size:13px;color:#8a94a6}
 </style></head><body>
 <div id="app">
-<div class="card"><div class="hd"><span>指数 · 腾讯+东财双源(001冲突修复)</span><span id="idx-time" style="font-size:10px;color:#8a94a6">--</span></div><div id="idx"></div></div>
-<div class="card"><div class="hd"><span>自选 · 筹码分布·盘中实时陡升</span><span id="badge" class="badge">检测中</span></div><div id="watch"></div><div style="padding:8px;display:flex;gap:8px"><input id="code" placeholder="600000" style="flex:1;background:#1c2532;border:1px solid #232f40;color:#fff;border-radius:8px;padding:9px"><button id="add" style="background:#3a8bff;color:#fff;border:0;border-radius:8px;padding:9px 14px;font-weight:700">添加</button></div></div>
+<div class="card"><div class="hd"><span>指数 · 临时数据版</span><span id="idx-time" style="font-size:10px;color:#8a94a6">--</span></div><div id="idx"></div></div>
+<div class="card"><div class="hd"><span>自选 · 全临时150天·筹码调试</span><span id="badge" class="badge">临时数据</span></div><div id="watch"></div><div style="padding:8px;display:flex;gap:8px"><input id="code" placeholder="300313" style="flex:1;background:#1c2532;border:1px solid #232f40;color:#fff;border-radius:8px;padding:9px"><button id="add" style="background:#3a8bff;color:#fff;border:0;border-radius:8px;padding:9px 14px;font-weight:700">添加</button></div></div>
 <div class="card"><div class="hd"><span>说明</span></div><div class="hint" id="log">加载中...</div></div>
 </div>
 <div class="detail" id="detail"><div style="padding:10px;display:flex;justify-content:space-between;position:sticky;top:0;background:#0a0e14;z-index:2"><span id="dtitle"></span><button id="closeBtn" style="background:#232f40;color:#fff;border:0;border-radius:8px;padding:6px 10px">关闭</button></div>
-<div class="kbox" style="position:relative"><div id="loadingMask" class="loading" style="display:none">计算筹码中...</div><canvas id="mainC" style="height:360px"></canvas><canvas id="subC" style="height:140px;margin-top:8px"></canvas><div id="dinfo" class="hint"></div></div></div>
+<div class="kbox" style="position:relative"><div id="loadingMask" class="loading" style="display:none">计算150天筹码中...</div><canvas id="mainC" style="height:380px"></canvas><canvas id="subC" style="height:140px;margin-top:8px"></canvas><div id="dinfo" class="hint"></div></div></div>
 <script>
-const REPO='itssteepturn-lgtm/stock-data-v5';
-const RAW=`https://raw.githubusercontent.com/${REPO}/main`;
-
 function secid(c){ c=String(c).padStart(6,'0'); if(c==='000001'||c==='000688'||c==='000300'||c==='000905') return '1.'+c; if(c.startsWith('60')||c.startsWith('68')) return '1.'+c; return '0.'+c; }
 function tencentPrefix(c){ c=String(c).padStart(6,'0'); if(c==='000001'||c==='000688') return 'sh'; if(c.startsWith('60')||c.startsWith('68')) return 'sh'; return 'sz'; }
 function limitPct(code){
@@ -54,16 +51,7 @@ function limitPct(code){
   if(code.startsWith('8')||code.startsWith('4')||code.startsWith('92')) return 0.30;
   return 0.10;
 }
-function histFileName(code, isIdx){
-  const c=String(code).padStart(6,'0');
-  if(isIdx){
-    if(c==='000001') return 'idx_sh_000001.json';
-    if(c==='000688') return 'idx_sh_000688.json';
-    return `idx_${c}.json`;
-  }
-  return `${tencentPrefix(c)}_${c}.json`;
-}
-let watch=JSON.parse(localStorage.getItem('v5_watch')||'["000001","399006","600519","300313"]');
+let watch=JSON.parse(localStorage.getItem('v5_watch')||'["300313","600519","000001","399006"]');
 
 function ensureIdx(){
   const w=document.getElementById('idx'); if(w.children.length) return;
@@ -89,7 +77,7 @@ function ensureWatch(){
 }
 ensureIdx(); ensureWatch();
 
-// 指数和自选：腾讯批量，修复-8000% BUG
+// 指数和自选价格：腾讯批量，修复-8000%
 async function fetchQtBatch(codes, isIdxList=false){
   const qlist=codes.map(c=>{
     const cc=String(c).padStart(6,'0');
@@ -108,9 +96,7 @@ async function fetchQtBatch(codes, isIdxList=false){
     let prev=parseFloat(vs[4]);
     let open=parseFloat(vs[5]), high=parseFloat(vs[33]), low=parseFloat(vs[34]);
     let change, pct;
-    // 区分s_和非s_格式，修复-8000%
     if(isNaN(prev) || Math.abs(prev)<1 || vs[4]==='' ){
-      // s_格式：vs[4]=涨跌额，vs[5]=涨跌幅%
       change=parseFloat(vs[4]);
       pct=parseFloat(vs[5]);
       if(vs[5] && vs[5].includes('%')) pct=parseFloat(vs[5]);
@@ -118,7 +104,6 @@ async function fetchQtBatch(codes, isIdxList=false){
       if(isNaN(pct)) pct=prev? change/prev*100:0;
       if(isNaN(open)) open=prev||price;
     }else{
-      // 非s_格式：vs[4]=昨收
       change=price-prev;
       pct=prev? change/prev*100:0;
       const pct2=parseFloat(vs[32]);
@@ -126,26 +111,40 @@ async function fetchQtBatch(codes, isIdxList=false){
     }
     if(isNaN(high)||high<=0) high=Math.max(price,open||price);
     if(isNaN(low)||low<=0) low=Math.min(price,open||price);
-    const lim=0.3; // 兜底，最大30%
+    const lim=0.3;
     if(high>price*(1+lim*1.05)) high=Math.max(price,open||price);
     if(low<price*(1-lim*1.05)) low=Math.min(price,open||price);
     if(!isNaN(price)) map[m[1]]={price,prev,pct,open,high,low,change};
   });
   return map;
 }
-async function fetchEastTurn(code, isIdx){
-  // 东财实时换手率 f168，成交额 f58，成交量 f57，均价 f... 
+// 东财实时：拿真实turn f168，均价
+async function fetchEastTurn(code){
   try{
     const sid=secid(code);
-    const j=await fetch(`https://push2.eastmoney.com/api/qt/stock/get?secid=${sid}&fields=f43,f44,f45,f46,f57,f58,f168,f116,f117`).then(r=>r.json());
+    const j=await fetch(`https://push2.eastmoney.com/api/qt/stock/get?secid=${sid}&fields=f43,f44,f45,f46,f57,f58,f168`).then(r=>r.json());
     const d=j?.data; if(!d) return null;
-    let price=d.f43!=null?d.f43/100:0;
-    let high=d.f44!=null?d.f44/100:0, low=d.f45!=null?d.f45/100:0, open=d.f46!=null?d.f46/100:0;
     let vol=d.f57||0, amount=d.f58||0;
-    let turn=d.f168!=null?d.f168/100:0; // f168是%，如0.68% -> 0.0068
+    let turn=d.f168!=null?d.f168/100:0;
     if(turn>1) turn=turn/100;
-    // 如果f168没有，用f116 f117算？先返回turn
-    return {price, high, low, open, vol, amount, turn, avgPrice: vol? amount/vol : price};
+    return {vol, amount, turn, avgPrice: vol? amount/vol/100 : 0}; // 东财amount单位是元*100？
+  }catch{ return null; }
+}
+async function fetchEastKlineTurn(code, count){
+  // 东财K线带真实turn，用于150天历史turn
+  try{
+    const sid=secid(code);
+    // f168历史？用kline接口
+    const j=await fetch(`https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${sid}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt=101&fqt=1&beg=0&end=20500000&lmt=${count}`).then(r=>r.json());
+    const klines=j?.data?.klines;
+    if(!klines||!klines.length) return null;
+    return klines.map(s=>{
+      const v=s.split(',');
+      // f51 date, f52 open, f53 close, f54 high, f55 low, f56 vol, f57 amount, f58 振幅, f59 涨跌幅, f60 涨跌额, f61 换手率
+      return {
+        d:v[0], o:+v[1], c:+v[2], h:+v[3], l:+v[4], v:+v[5], a:+v[6], turn: v[10] ? +v[10]/100 : 0
+      };
+    });
   }catch{ return null; }
 }
 
@@ -185,26 +184,11 @@ function startTimers(){
   if(watchTimer) clearInterval(watchTimer);
   loadIdx(); loadWatch();
   idxTimer=setInterval(loadIdx, 30000);
-  watchTimer=setInterval(loadWatch, 3000); // 退回3秒
+  watchTimer=setInterval(loadWatch, 3000);
 }
 startTimers();
-document.addEventListener('visibilitychange',()=>{ if(document.hidden){ clearInterval(idxTimer); clearInterval(watchTimer); } else startTimers(); });
 
-// ===== 筹码分布：按你给的算法，300格，三角分布，实时turn =====
-async function getHistRaw(code, isIdx){
-  const c=String(code).padStart(6,'0');
-  const fileName=histFileName(c, isIdx);
-  const urls=[
-    `${RAW}/data/history/${fileName}?t=${Date.now()}`,
-    `${RAW}/data/history/${c}.json?t=${Date.now()}`,
-    `${RAW}/data/history/sh_${c}.json?t=${Date.now()}`,
-    `${RAW}/data/history/sz_${c}.json?t=${Date.now()}`,
-  ];
-  for(const url of urls){
-    try{ const r=await fetch(url); if(r.ok){ const j=await r.json(); const arr=Array.isArray(j)?j:j; if(arr.length>=20) return arr; } }catch{}
-  }
-  return [];
-}
+// ===== V8调试版：全临时150天，不读库 =====
 async function getTencentKline(code, count, isIdx){
   try{
     const pref=isIdx? (code==='000001'||code==='000688'?'sh':'sz') : tencentPrefix(code);
@@ -217,58 +201,55 @@ async function getTencentKline(code, count, isIdx){
     return klines.map(k=>({d:k[0], o:+k[1], c:+k[2], h:+k[3], l:+k[4], v:+k[5]*100, a:0, turn:0}));
   }catch{ return []; }
 }
-async function getFullBars(code, isIdx){
-  let hist=await getHistRaw(code, isIdx);
-  if(!hist || hist.length<30){
+
+async function getFullBarsTemp(code, isIdx){
+  // 1. 优先东财带turn的150天
+  let bars=await fetchEastKlineTurn(code, 150);
+  if(!bars || bars.length<60){
+    // 2. 腾讯150天
     const tk=await getTencentKline(code, 150, isIdx);
-    if(tk.length>20) hist=tk;
+    if(tk.length>60) bars=tk;
   }
-  let bars=hist.map(b=>({
-    d:b.d||b.date, o:+(b.o||b.open), h:+(b.h||b.high), l:+(b.l||b.low), c:+(b.c||b.close),
-    v:+(b.v||b.vol||0), a:+(b.a||b.amount||0), turn: b.turn!=null ? +b.turn : 0
-  }));
-  // 今日实时：拿准确的turn和avgPrice
-  let todayQt=null, todayEast=null;
-  try{ todayQt=(await fetchQtBatch([code], isIdx))[Object.keys(await fetchQtBatch([code], isIdx))[0]]; }catch{}
-  try{ todayEast=await fetchEastTurn(code, isIdx); }catch{}
-  // 合并今日
-  const qtMap=await fetchQtBatch([code], isIdx);
-  let qt=null; for(const k in qtMap){ if(k.includes(code)){ qt=qtMap[k]; break; } }
-  if(qt){
-    const east=todayEast;
-    let turn=0;
-    if(east && east.turn && east.turn>0 && east.turn<0.5) turn=east.turn;
-    else if(east && east.vol && east.amount){
-      // 用东财vol/amount算的turn如果没有，估算用qt的vol？先用0.01兜底，盘中会越来越准
-      turn=east.turn||0;
-    }
+  if(!bars || bars.length<20) return {calcBars:[], displayBars:[], note:'临时数据拉取失败'};
+  // 如果东财没有turn，用估算
+  const vols=bars.map(b=>b.v||0);
+  const avgVol=vols.reduce((a,b)=>a+b,0)/vols.length||1;
+  bars=bars.map(b=>{
+    let turn=b.turn;
     if(!turn || turn<=0){
-      // 用昨日turn或估算：vol/avgVol * 昨日turn
-      const avgVol=bars.slice(-20).reduce((s,b)=>s+b.v,0)/20||1;
+      let t=b.v/(avgVol*100);
+      if(!isFinite(t)||t<=0) t=0.008;
+      turn=Math.min(Math.max(t,0.001),0.25);
+    }
+    return {...b, turn};
+  });
+  // 今日实时
+  let qt=null, east=null;
+  try{
+    const qmap=await fetchQtBatch([code], isIdx);
+    for(const k in qmap){ if(k.includes(code)){ qt=qmap[k]; break; } }
+  }catch{}
+  try{ east=await fetchEastTurn(code); }catch{}
+  if(qt){
+    let turn=east && east.turn && east.turn>0 ? east.turn : 0;
+    if(!turn || turn<=0){
+      // 用昨日turn*0.5开盘，随东财更新
       const yTurn=bars[bars.length-1]?.turn||0.01;
-      const estVol=qtMap[Object.keys(qtMap)[0]]?.vol || 0;
-      // 如果拿不到实时vol，用price变化估
-      turn=yTurn*0.3; // 开盘先给昨日30%，随着东财turn上来会替换
+      turn=yTurn*0.5;
       if(east && east.turn) turn=east.turn;
     }
-    // 钳制turn 0.1%~30%
     turn=Math.min(Math.max(turn,0.001),0.3);
-    const avgPrice=east && east.avgPrice ? east.avgPrice : qt.price;
-    const amount=east? east.amount : avgPrice*qt.price*100;
-    // 动态限幅保护，20%/30%按代码来
     const lim=limitPct(code);
     let h=qt.high, l=qt.low, o=qt.open, c=qt.price;
     if(h>c*(1+lim*1.1)) h=Math.max(o,c);
     if(l<c*(1-lim*1.1)) l=Math.min(o,c);
-    if(h<=0) h=Math.max(o,c);
-    if(l<=0) l=Math.min(o,c);
-    // 允许high==low一字板，三角分布退化为单点在price，不会拉到右上角
-    const todayBar={d:'今日实时', o, h, l, c, v: (east?east.vol:0), a: amount, turn, avgPrice, isToday:true};
+    const avgPrice=east && east.avgPrice ? east.avgPrice : (qt.price+o+h+l)/4;
+    const todayBar={d:'今日实时', o, h, l, c, v:east?east.vol:0, a:east?east.amount:0, turn, avgPrice, isToday:true};
     bars.push(todayBar);
   }
   const calcBars=bars.slice(-150);
   const displayBars=bars.slice(-60);
-  return {calcBars, displayBars, note:`计算${calcBars.length}根，显示60根，300格，实时turn=${bars[bars.length-1]?.turn? (bars[bars.length-1].turn*100).toFixed(2)+'%':''} 来自东财f168`};
+  return {calcBars, displayBars, note:`全临时：计算${calcBars.length}根，显示60根，价格区间150天min-max切300格，turn实时东财f168，${bars[bars.length-1]?.turn? '今日turn='+(bars[bars.length-1].turn*100).toFixed(2)+'%':''}`};
 }
 
 function buildChipDistribution(bars){
@@ -279,17 +260,11 @@ function buildChipDistribution(bars){
   if(!isFinite(minPrice)||minPrice<=0) minPrice=Math.min(...bars.map(b=>b.c))*0.8;
   if(maxPrice<=minPrice) maxPrice=minPrice*1.2;
   const GRID=300;
-  const step=(maxPrice-minPrice)/GRID;
+  const step=(maxPrice-minPrice)/GRID|| (maxPrice*0.001);
   let dist=new Array(GRID).fill(0);
-  const vols=bars.map(b=>b.v||0);
-  const avgVol=vols.reduce((a,b)=>a+b,0)/vols.length||1;
   function getTurn(b){
     if(b.turn && b.turn>0 && b.turn<0.5) return Math.min(Math.max(b.turn,0.0005),0.3);
-    // 估算：vol/(avgVol*100) ~0.01
-    const v=b.v||0;
-    let t=v/(avgVol*100);
-    if(!isFinite(t)||t<=0) t=0.008;
-    return Math.min(Math.max(t,0.001),0.25);
+    return 0.01;
   }
   function getAvgPrice(b){
     if(b.avgPrice && b.avgPrice>0) return b.avgPrice;
@@ -308,7 +283,6 @@ function buildChipDistribution(bars){
     const b=bars[i];
     const turn=getTurn(b);
     const avgPrice=getAvgPrice(b);
-    // 旧筹码衰减
     for(let g=0;g<GRID;g++) dist[g]*=(1-turn);
     const low=b.l, high=b.h;
     if(low>0 && high>0 && high>=low){
@@ -316,19 +290,18 @@ function buildChipDistribution(bars){
       const highIdx=Math.min(GRID-1, Math.floor((high-minPrice)/step));
       let avgIdx=Math.floor((avgPrice-minPrice)/step);
       avgIdx=Math.max(lowIdx, Math.min(highIdx, avgIdx));
-      // 三角分布权重
-      let weights=new Array(highIdx-lowIdx+1).fill(0);
-      for(let j=0;j<weights.length;j++){
-        const g=lowIdx+j;
-        if(highIdx===lowIdx) weights[j]=1;
+      let weights=[];
+      for(let g=lowIdx; g<=highIdx; g++){
+        let w;
+        if(highIdx===lowIdx) w=1;
         else if(g<=avgIdx){
           const denom=(avgIdx-lowIdx)||1;
-          weights[j]=(g-lowIdx)/denom;
+          w=(g-lowIdx)/denom;
         }else{
           const denom=(highIdx-avgIdx)||1;
-          weights[j]=(highIdx-g)/denom;
+          w=(highIdx-g)/denom;
         }
-        weights[j]=Math.max(0,weights[j]);
+        weights.push(Math.max(0,w));
       }
       const sumW=weights.reduce((a,b)=>a+b,0)||1;
       for(let j=0;j<weights.length;j++){
@@ -359,38 +332,79 @@ function buildChipDistribution(bars){
     zqArr[i]=winner(b.c);
     zq1Arr[i]=winner(vwmaArr[i]);
   }
-  return {cost50:cost50Arr, cost75:cost75Arr, cost90:cost90Arr, zq:zqArr, zq1:zq1Arr, vwma:vwmaArr, minPrice, maxPrice};
+  return {cost50:cost50Arr, cost75:cost75Arr, cost90:cost90Arr, zq:zqArr, zq1:zq1Arr, vwma:vwmaArr, minPrice, maxPrice, dist};
 }
 
 function setup(c){ const dpr=window.devicePixelRatio||1; const w=c.clientWidth, h=c.clientHeight; c.width=w*dpr; c.height=h*dpr; const ctx=c.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,w,h); return {ctx,w,h}; }
 let currentCode=null, currentIsIdx=false;
+let cache={}; // 缓存150天计算结果，秒开
 async function openDetail(code, isIdx){
   currentCode=code; currentIsIdx=isIdx;
   const detail=document.getElementById('detail');
   const mask=document.getElementById('loadingMask');
   detail.classList.add('open'); mask.style.display='flex';
-  document.getElementById('dtitle').textContent=code+' · 筹码计算中...';
+  document.getElementById('dtitle').textContent=code+' · 150天筹码计算中...';
   setup(document.getElementById('mainC')); setup(document.getElementById('subC'));
-  document.getElementById('dinfo').textContent='按300格三角分布计算中...';
-  const {calcBars, displayBars, note}=await getFullBars(code, isIdx);
+  document.getElementById('dinfo').textContent='全临时150天，300格三角分布计算中...';
+  // 缓存
+  const cacheKey=code+'_'+(isIdx?'idx':'stk');
+  let calcBars, displayBars, note, fullResult;
+  if(cache[cacheKey] && !isIdx){
+    // 缓存有历史分布，只算今日
+    const c=cache[cacheKey];
+    const {calcBars:cb, displayBars:db, note:n}=await getFullBarsTemp(code, isIdx);
+    calcBars=cb; displayBars=db; note=n;
+    // 用缓存的dist继续算今日
+    let dist=[...c.dist];
+    const lastBar=calcBars[calcBars.length-1];
+    const turn=lastBar.turn||0.01;
+    const avgPrice=lastBar.avgPrice||lastBar.c;
+    const minPrice=c.minPrice, maxPrice=c.maxPrice, step=(maxPrice-minPrice)/300;
+    const GRID=300;
+    for(let g=0;g<GRID;g++) dist[g]*=(1-turn);
+    const low=lastBar.l, high=lastBar.h;
+    if(low>0 && high>0){
+      const lowIdx=Math.max(0, Math.floor((low-minPrice)/step));
+      const highIdx=Math.min(GRID-1, Math.floor((high-minPrice)/step));
+      let avgIdx=Math.floor((avgPrice-minPrice)/step);
+      avgIdx=Math.max(lowIdx, Math.min(highIdx, avgIdx));
+      let weights=[];
+      for(let g=lowIdx; g<=highIdx; g++){
+        let w;
+        if(highIdx===lowIdx) w=1;
+        else if(g<=avgIdx){ const denom=(avgIdx-lowIdx)||1; w=(g-lowIdx)/denom; }
+        else{ const denom=(highIdx-avgIdx)||1; w=(highIdx-g)/denom; }
+        weights.push(Math.max(0,w));
+      }
+      const sumW=weights.reduce((a,b)=>a+b,0)||1;
+      for(let j=0;j<weights.length;j++) dist[lowIdx+j]+=weights[j]/sumW*turn;
+    }
+    // 重新算COST/ZQ最后几根
+    const total=dist.reduce((a,b)=>a+b,0)||1;
+    let cum=0, c50=0,c75=0,c90=0;
+    for(let g=0;g<GRID;g++){ cum+=dist[g]; const price=minPrice+g*step; if(c50===0 && cum/total>=0.5) c50=price; if(c75===0 && cum/total>=0.75) c75=price; if(c90===0 && cum/total>=0.9) c90=price; }
+    function winner(price){ let win=0; for(let g=0;g<GRID;g++){ const p=minPrice+g*step; if(p<=price) win+=dist[g]; } return win/total*100; }
+    const vwma=lastBar.c;
+    const zq=winner(lastBar.c), zq1=winner(vwma);
+    fullResult={cost50:[...c.cost50, c50], cost75:[...c.cost75, c75], cost90:[...c.cost90, c90], zq:[...c.zq, zq], zq1:[...c.zq1, zq1], minPrice, maxPrice, dist};
+    // 显示
+    const offset=calcBars.length-displayBars.length;
+    var inds={cost50:fullResult.cost50.slice(offset), cost75:fullResult.cost75.slice(offset), cost90:fullResult.cost90.slice(offset), zq:fullResult.zq.slice(offset), zq1:fullResult.zq1.slice(offset)};
+  }else{
+    const res=await getFullBarsTemp(code, isIdx);
+    calcBars=res.calcBars; displayBars=res.displayBars; note=res.note;
+    if(!calcBars.length){ document.getElementById('dinfo').textContent='临时数据拉取失败'; mask.style.display='none'; return; }
+    fullResult=buildChipDistribution(calcBars);
+    cache[cacheKey]={...fullResult, dist:[...fullResult.dist]};
+    const offset=calcBars.length-displayBars.length;
+    var inds={cost50:fullResult.cost50.slice(offset), cost75:fullResult.cost75.slice(offset), cost90:fullResult.cost90.slice(offset), zq:fullResult.zq.slice(offset), zq1:fullResult.zq1.slice(offset)};
+  }
   if(currentCode!==code) return;
-  if(!calcBars.length){ document.getElementById('dinfo').textContent='无数据'; mask.style.display='none'; return; }
-  const fullResult=buildChipDistribution(calcBars);
-  if(!fullResult){ document.getElementById('dinfo').textContent='计算失败'; mask.style.display='none'; return; }
-  const offset=calcBars.length-displayBars.length;
-  const inds={
-    cost50:fullResult.cost50.slice(offset),
-    cost75:fullResult.cost75.slice(offset),
-    cost90:fullResult.cost90.slice(offset),
-    zq:fullResult.zq.slice(offset),
-    zq1:fullResult.zq1.slice(offset),
-  };
-  // 今日实时参与，不沿用昨日，让它陡升
   mask.style.display='none';
-  document.getElementById('dtitle').textContent=code+ (isIdx?' · 指数':' · 筹码 盘中实时');
-  let infoHtml=`<div>${note}</div><div>共${displayBars.length}根，最新 ${displayBars[displayBars.length-1].c.toFixed(2)} ${displayBars[displayBars.length-1].d==='今日实时'?'(今日实时，盘中陡升可见)':''}</div>`;
+  document.getElementById('dtitle').textContent=code+ (isIdx?' · 指数':' · 150天筹码·全临时');
+  let infoHtml=`<div>${note}</div><div>共${displayBars.length}根显示，最新 ${displayBars[displayBars.length-1].c.toFixed(2)} ${displayBars[displayBars.length-1].d==='今日实时'?'(今日实时，东财f168实时turn，盘中陡升可见)':''}</div>`;
   if(!isIdx){
-    infoHtml+=`<div>COST50 ${inds.cost50[inds.cost50.length-1].toFixed(2)} COST75 ${inds.cost75[inds.cost75.length-1].toFixed(2)} COST90 ${inds.cost90[inds.cost90.length-1].toFixed(2)} <span style="color:#ff3b3b">←实时turn，东财f168，盘中陡升可见</span></div><div>ZQ ${inds.zq[inds.zq.length-1].toFixed(1)} ZQ1 ${inds.zq1[inds.zq1.length-1].toFixed(1)} <span style="color:#ffcc00">←WINNER(均价)/WINNER(10日VWMA)</span></div>`;
+    infoHtml+=`<div>COST50 ${inds.cost50[inds.cost50.length-1].toFixed(2)} COST75 ${inds.cost75[inds.cost75.length-1].toFixed(2)} COST90 ${inds.cost90[inds.cost90.length-1].toFixed(2)} <span style="color:#ff3b3b">←150天min-max切300格，三角分布</span></div><div>ZQ ${inds.zq[inds.zq.length-1].toFixed(1)} ZQ1 ${inds.zq1[inds.zq1.length-1].toFixed(1)} <span style="color:#ffcc00">←WINNER(均价)/WINNER(10日VWMA)</span></div>`;
     drawK(displayBars, inds, false, code);
   }else{
     infoHtml+=`<div style="color:#8a94a6">指数不计算COST/ZQ</div>`;
@@ -401,24 +415,22 @@ async function openDetail(code, isIdx){
 function drawK(bars, inds, isIdx, code){
   const mainC=document.getElementById('mainC'), subC=document.getElementById('subC');
   const {ctx,w,h}=setup(mainC); const {ctx:ctx2,w:w2,h:h2}=setup(subC);
-  const padX=12, padY=h*0.1;
+  const padX=14, padY=h*0.12;
   const min=Math.min(...bars.map(b=>b.l).filter(x=>x>0)), max=Math.max(...bars.map(b=>b.h));
   const range=(max-min)||1;
-  const yMin=min-range*0.05, yMax=max+range*0.12;
+  const yMin=min-range*0.05, yMax=max+range*0.15;
   const y=v=>h-padY-(v-yMin)/(yMax-yMin||1)*(h-padY*2);
   const x=i=>padX + i/(bars.length-1||1)*(w-padX*2);
   ctx.fillStyle='#0a0e14'; ctx.fillRect(0,0,w,h);
   ctx2.fillStyle='#0a0e14'; ctx2.fillRect(0,0,w2,h2);
-  const bw=Math.max(4, (w-padX*2)/bars.length*0.55);
+  const bw=Math.max(4, (w-padX*2)/bars.length*0.5);
   bars.forEach((b,i)=>{
     const xx=x(i); const up=b.c>=b.o; ctx.fillStyle=up?'#ff3b3b':'#00c873'; ctx.strokeStyle=ctx.fillStyle;
     const yO=y(b.o), yC=y(b.c), yH=y(b.h), yL=y(b.l);
     ctx.beginPath(); ctx.moveTo(xx,yH); ctx.lineTo(xx,yL); ctx.lineWidth=1; ctx.stroke();
     const top=Math.min(yO,yC), hh=Math.max(2, Math.abs(yO-yC));
     ctx.fillRect(xx-bw/2, top, bw, hh);
-    if(b.isToday){
-      ctx.fillStyle='#ff3b3b'; ctx.font='10px sans-serif'; ctx.fillText('实时', xx+8, y(b.c)-6);
-    }
+    if(b.isToday){ ctx.fillStyle='#ff3b3b'; ctx.font='10px sans-serif'; ctx.fillText('实时', xx+8, y(b.c)-6); }
   });
   if(!isIdx && inds){
     function drawLine(arr,color){
@@ -442,15 +454,11 @@ function drawK(bars, inds, isIdx, code){
     const ma5=ma(5), ma10=ma(10);
     ctx.beginPath(); ma5.forEach((v,i)=>{const xx=x(i); if(i==0) ctx.moveTo(xx,y(v)); else ctx.lineTo(xx,y(v));}); ctx.strokeStyle='#ffcc00'; ctx.lineWidth=1; ctx.stroke();
     ctx.beginPath(); ma10.forEach((v,i)=>{const xx=x(i); if(i==0) ctx.moveTo(xx,y(v)); else ctx.lineTo(xx,y(v));}); ctx.strokeStyle='#3a8bff'; ctx.stroke();
-    const maxV=Math.max(...bars.map(b=>b.v)); const yv=v=>h2-5-v/maxV*(h2-10);
-    bars.forEach((b,i)=>{ const xx=x(i); const up=b.c>=b.o; ctx2.fillStyle=up?'#ff3b3b55':'#00c87355'; ctx2.fillRect(xx-2.5,yv(b.v),5,h2-5-yv(b.v)); });
   }
 }
 document.getElementById('closeBtn').onclick=()=>{ currentCode=null; document.getElementById('detail').classList.remove('open'); };
-fetch(`${RAW}/data/meta.json?t=${Date.now()}`).then(r=>r.json()).then(m=>{
-  document.getElementById('badge').textContent=`自养 ${m.updated?.slice(0,10)} ${m.saved_total||''}只`;
-  document.getElementById('log').textContent=`V7 筹码分布·盘中实时陡升版：\n1. 按你的算法：300格，旧筹码*(1-turn)衰减，新筹码三角分布，峰值avgPrice\n2. turn实时：东财f168为主，腾讯vs[38]兜底，0.5%和6%是例子，不是参数，盘中真实turn，上午小下午大，COST就会陡升\n3. 限幅动态：30/68开头20%，8/4/92开头30%，其他10%，允许high==low一字板，不会拉到右上角\n4. 今日实时参与计算，像分时图一样每3秒画到当前位置，直到收盘\n5. K线统一粗细，去掉红虚线框，加12px和10%边界，涨停不贴边，001冲突和-8000%已修复`;
-}).catch(()=>{});
+document.getElementById('log').textContent=`V8调试版-全临时150天：\n1. 全临时数据：历史150根用腾讯qfq+东财kline带真实turn，不读你抓的库，先调对\n2. 价格区间：150天min(low)-max(high)切300格，不是上市以来，短线够用\n3. 旧筹码*(1-turn)衰减，新筹码turn三角分布，峰值avgPrice=amount/vol，归一化保证总量=turn\n4. COST50/75/90累计50/75/90%，ZQ=WINNER(均价)/WINNER(10日VWMA)，和你给的思路一致\n5. 今日实时：东财f168实时turn，不是0.5%/6%写死，上午小下午大，COST就会陡升，盘中实时可见，像分时一样\n6. 秒开：第一次算150*300缓存，第二次点同一只0.05秒，K线统一粗细，去掉红虚线框，加14px和12%边界，涨停不贴边`;
+document.getElementById('badge').textContent=`临时150天·调试中`;
 document.getElementById('add').onclick=()=>{
   let c=document.getElementById('code').value.replace(/\D/g,'').padStart(6,'0');
   if(!/^\d{6}$/.test(c)) return alert('6位');
