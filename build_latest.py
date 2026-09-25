@@ -14,8 +14,8 @@ from datetime import datetime, timedelta
 
 GRID=300
 HIST_DAYS=150
-BATCH=200
-RETRY=2
+BATCH=500  # 原200太慢，改为500，你截图里每小时200支一晚跑不完，500*10轮=5000支刚好全市场
+RETRY=3
 
 def build_chip(bars):
     n=len(bars)
@@ -80,24 +80,59 @@ def build_chip(bars):
     return dict(cost50=cost50,cost75=cost75,cost90=cost90,zq=zq,zq1=zq1,vwma=vwma,minP=minP,maxP=maxP,dist=dist)
 
 def get_codes():
-    lg=bs.login()
-    rs=bs.query_stock_basic()
+    # 带重试和日志，解决你截图里 股票0 指数0 的问题
+    import json
     stocks=[]; indices=[]
-    while rs.error_code=='0' and rs.next():
-        row=rs.get_row_data()
-        code_full=row[0]
-        code=code_full.split('.')[1]
-        # type row[3] 1股票 2指数
+    for attempt in range(3):
         try:
-            type_ = row[3]
-            status = row[4] if len(row)>4 else '1'
-        except:
-            type_='1'; status='1'
-        if type_=='1' and status=='1':
-            stocks.append(code)
-        elif type_=='2':
-            indices.append(code)
-    bs.logout()
+            lg=bs.login()
+            print(f'baostock login attempt {attempt} {lg.error_code} {lg.error_msg}')
+            rs=bs.query_stock_basic()
+            print(f'query_stock_basic error_code={rs.error_code} msg={rs.error_msg}')
+            cnt=0
+            while rs.error_code=='0' and rs.next():
+                row=rs.get_row_data()
+                cnt+=1
+                if len(row)<5: continue
+                code_full=row[0]  # sh.600000
+                try:
+                    code=code_full.split('.')[1]
+                except:
+                    continue
+                type_=row[3] if len(row)>3 else '1'
+                status=row[4] if len(row)>4 else '1'
+                if type_=='1' and status=='1':
+                    stocks.append(code)
+                elif type_=='2':
+                    indices.append(code)
+            print(f'本次取到 股票{len(stocks)} 指数{len(indices)} 遍历行{cnt}')
+            bs.logout()
+            if stocks:
+                # 缓存股票列表，下次baostock挂了也能用
+                os.makedirs('data', exist_ok=True)
+                try:
+                    with open('data/stocks_list.json','w') as f:
+                        json.dump(dict(stocks=stocks, indices=indices, updated=datetime.now().isoformat()), f)
+                except: pass
+                return stocks, indices
+        except Exception as e:
+            print(f'get_codes 异常 {e} attempt {attempt}')
+            try: bs.logout()
+            except: pass
+        time.sleep(2)
+    # 全部失败，尝试读缓存
+    try:
+        if os.path.exists('data/stocks_list.json'):
+            with open('data/stocks_list.json') as f:
+                j=json.load(f)
+                print(f'使用缓存 stocks_list.json 股票{len(j.get("stocks",[]))}')
+                return j.get('stocks',[]), j.get('indices',[])
+        if os.path.exists('data/meta.json'):
+            # 至少用 steep_all 的 code 续跑
+            pass
+    except Exception as e:
+        print(f'读缓存失败 {e}')
+    print('get_codes 最终返回0，可能是baostock境外限流，请重试Actions')
     return stocks, indices
 
 def fetch_kline(code):
