@@ -1,12 +1,8 @@
 """
-build_latest_v5_full.py - V5全功能版后台，iPhone专用
-要求：
-- 0:30后每轮200只，卡顿跳过，查缺补漏，开盘前全市场齐
-- 指数和个股分开，00001不重复
-- 每只算150天COST/ZQ历史，每时每刻都算，用于选股，不只是陡升
-- 均价用通达信 amount/(vol*100)，amount/vol
-- 生成 data/stocks/ data/indices/ data/meta.json data/steep_all.json
-- baostock，不限境外，GitHub Actions可跑
+build_latest.py - V5全功能版后台，iPhone专用 高效修复版
+- 修复股票0指数0：baostock列错位 type在第5列 status在第6列
+- BATCH 500，每半小时一轮，0:30-9:00一晚跑完全市场
+- 缓存 stocks_list.json，境外限流也能续跑
 """
 import baostock as bs
 import json, os, time
@@ -14,7 +10,7 @@ from datetime import datetime, timedelta
 
 GRID=300
 HIST_DAYS=150
-BATCH=500  # 原200太慢，改为500，你截图里每小时200支一晚跑不完，500*10轮=5000支刚好全市场
+BATCH=500
 RETRY=3
 
 def build_chip(bars):
@@ -80,9 +76,8 @@ def build_chip(bars):
     return dict(cost50=cost50,cost75=cost75,cost90=cost90,zq=zq,zq1=zq1,vwma=vwma,minP=minP,maxP=maxP,dist=dist)
 
 def get_codes():
-    # 修复版：baostock 6列是 code, name, ipo, out, type, status
-    import json
-    stocks=[]; indices=[]
+    stocks=[]
+    indices=[]
     for attempt in range(3):
         try:
             lg=bs.login()
@@ -90,29 +85,25 @@ def get_codes():
             rs=bs.query_stock_basic()
             print(f'query_stock_basic error_code={rs.error_code} msg={rs.error_msg}')
             cnt=0
-            sample_printed=0
+            sample=0
             while rs.error_code=='0' and rs.next():
                 row=rs.get_row_data()
                 cnt+=1
-                # 调试：打印前3行看列结构
-                if sample_printed<3:
+                if sample<3:
                     print(f'示例行{cnt}: {row}')
-                    sample_printed+=1
+                    sample+=1
                 if len(row)<6:
                     continue
-                # 正确列：row[0]=sh.600000, row[1]=名称, row[2]=ipo, row[3]=out, row[4]=type, row[5]=status
                 code_full=row[0]
                 try:
                     code=code_full.split('.')[1]
                 except:
                     continue
-                type_=row[4] if len(row)>4 else ''
+                type_=row[4]
                 status=row[5] if len(row)>5 else '1'
-                # type 1=股票 2=指数
                 if type_=='1' and status=='1':
                     stocks.append(code)
                 elif type_=='2':
-                    # 指数不管是否退市都保留，方便前台显示
                     indices.append(code)
             print(f'本次取到 股票{len(stocks)} 指数{len(indices)} 遍历行{cnt}')
             bs.logout()
@@ -121,15 +112,16 @@ def get_codes():
                 try:
                     with open('data/stocks_list.json','w') as jf:
                         json.dump(dict(stocks=stocks, indices=indices, updated=datetime.now().isoformat()), jf)
-                except: pass
+                except:
+                    pass
                 return stocks, indices
         except Exception as e:
             print(f'get_codes 异常 {e} attempt {attempt}')
-            import traceback; traceback.print_exc()
-            try: bs.logout()
-            except: pass
+            try:
+                bs.logout()
+            except:
+                pass
         time.sleep(2)
-    # 缓存兜底
     try:
         if os.path.exists('data/stocks_list.json'):
             with open('data/stocks_list.json') as f:
@@ -138,26 +130,7 @@ def get_codes():
                 return j.get('stocks',[]), j.get('indices',[])
     except Exception as e:
         print(f'读缓存失败 {e}')
-    print('get_codes 最终返回0，可能是解析仍有问题')
-    return stocks, indices
-        except Exception as e:
-            print(f'get_codes 异常 {e} attempt {attempt}')
-            try: bs.logout()
-            except: pass
-        time.sleep(2)
-    # 全部失败，尝试读缓存
-    try:
-        if os.path.exists('data/stocks_list.json'):
-            with open('data/stocks_list.json') as f:
-                j=json.load(f)
-                print(f'使用缓存 stocks_list.json 股票{len(j.get("stocks",[]))}')
-                return j.get('stocks',[]), j.get('indices',[])
-        if os.path.exists('data/meta.json'):
-            # 至少用 steep_all 的 code 续跑
-            pass
-    except Exception as e:
-        print(f'读缓存失败 {e}')
-    print('get_codes 最终返回0，可能是baostock境外限流，请重试Actions')
+    print('get_codes 最终返回0')
     return stocks, indices
 
 def fetch_kline(code):
@@ -175,7 +148,8 @@ def fetch_kline(code):
             vol=float(d[5]); amount=float(d[6]); turn=float(d[7])/100 if d[7] else 0.01
             avg=amount/vol if vol else (float(d[2])+float(d[3])+float(d[4]))/3
             data.append(dict(date=d[0], open=float(d[1]), high=float(d[2]), low=float(d[3]), close=float(d[4]), volume=vol, amount=amount, turn=turn, avg=avg))
-        except: pass
+        except:
+            pass
     bs.logout()
     return data[-HIST_DAYS:]
 
@@ -200,7 +174,6 @@ def main():
     os.makedirs('data', exist_ok=True)
     os.makedirs('data/stocks', exist_ok=True)
     os.makedirs('data/indices', exist_ok=True)
-    # 指数分开
     for code in indices[:80]:
         try:
             bars=fetch_kline(code)
@@ -208,14 +181,14 @@ def main():
         except Exception as e:
             print(f'指数 {code} 跳过 {e}')
             continue
-    # 股票断点续跑
     done=set()
     if os.path.exists('data/stocks'):
         for fn in os.listdir('data/stocks'):
             if fn.endswith('.json'):
                 try:
                     done.add(fn.split('_')[1].split('.')[0])
-                except: pass
+                except:
+                    pass
     print(f'已完成{len(done)}，待跑{len([c for c in stocks if c not in done])}')
     all_codes=[c for c in stocks if c not in done]
     round_idx=0
@@ -245,14 +218,12 @@ def main():
         all_codes = failed + all_codes[BATCH:]
         if not all_codes:
             break
-        # 开盘前必须齐 8:30
         now=datetime.now()
         if now.hour>=8 and now.minute>=30:
             print('快开盘，继续查缺补漏')
         time.sleep(3)
         if round_idx>30:
             break
-    # 生成meta和全市场COST/ZQ每时每刻
     steep_all=[]
     for fn in os.listdir('data/stocks'):
         try:
@@ -262,7 +233,8 @@ def main():
                 if len(bars)<3: continue
                 last=bars[-1]
                 steep_all.append(dict(code=fn.split('_')[1].split('.')[0], cost50=last['cost50'], cost75=last['cost75'], cost90=last['cost90'], zq=last['zq'], zq1=last['zq1'], turn=last['turn']*100, c=last['c'], d=last['d']))
-        except: continue
+        except:
+            continue
     with open('data/meta.json','w') as f:
         json.dump(dict(total=len(steep_all), lastUpdateDate=datetime.now().isoformat(), updated=datetime.now().isoformat(), note=f'指数{len(indices)} 股票{len(steep_all)} COST/ZQ历史+当日 amount/vol'), f)
     with open('data/steep_all.json','w') as f:
