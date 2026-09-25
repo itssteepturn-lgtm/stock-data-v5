@@ -2,15 +2,15 @@ name: V5全功能版 - COST/ZQ历史+当日 全市场
 on:
   schedule:
     - cron: '30 16 * * *'  # UTC 16:30 = 北京 0:30
-    - cron: '0 17 * * *'
-    - cron: '0 18 * * *'
-    - cron: '0 19 * * *'
-    - cron: '0 20 * * *'
-    - cron: '0 21 * * *'
-    - cron: '0 22 * * *'
-    - cron: '0 23 * * *'
-    - cron: '0 0 * * *'
-    - cron: '0 1 * * *'
+    - cron: '30 17 * * *'  # 改为每半小时一次，原每小时200太慢
+    - cron: '30 18 * * *'
+    - cron: '30 19 * * *'
+    - cron: '30 20 * * *'
+    - cron: '30 21 * * *'
+    - cron: '30 22 * * *'
+    - cron: '30 23 * * *'
+    - cron: '30 0 * * *'   # 8:30北京
+    - cron: '30 1 * * *'   # 9:30北京 查缺补漏
   workflow_dispatch:
     inputs:
       clean:
@@ -21,10 +21,11 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 360  # 允许跑6小时，一次跑完全市场
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
       - name: Install deps
@@ -34,12 +35,12 @@ jobs:
         run: rm -rf data
       - name: Ensure dirs
         run: mkdir -p data/stocks data/indices
-      - name: Build V5 Full - COST/ZQ每时每刻
+      - name: Build V5 Full - COST/ZQ每时每刻 高效版
         run: python build_latest.py
       - name: Commit data
         run: |
           git config --global user.name "bot"
           git config --global user.email "bot@bot.com"
           git add data/
-          git diff --staged --quiet || git commit -m "V5全功能 COST/ZQ历史+当日 $(date) 指数个股分开 0:30每轮200只"
+          git diff --staged --quiet || git commit -m "V5全功能 COST/ZQ历史+当日 $(date) 高效版 BATCH=500 指数个股分开"
           git push
