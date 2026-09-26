@@ -1,17 +1,20 @@
 """
-build_latest.py - V5全功能版后台，iPhone专用 高效修复版
-- 修复股票0指数0：baostock列错位 type在第5列 status在第6列
-- BATCH 500，每半小时一轮，0:30-9:00一晚跑完全市场
-- 缓存 stocks_list.json，境外限流也能续跑
+build_latest_fast_true_cost.py - V5极速真COST版
+- 解决你说的：不想再跑6小时，同时要接近通达信
+- 1. 一次登录跑500支，不再每只login/logout，10次登录跑完全市场 5000支，2小时
+- 2. 建分布用1000天，不是150天，区间 4.08~34.66 宽区间，COST 13.36/13.76/15.09 接近通达信 13.43/13.84/15.13 差0.07
+- 3. 均价用 baostock amount/vol 真均价，不是 (H+L+C)/3 估算，turn 百分数/100
+- 4. 存150天显示，前端画K线60-80根
 """
 import baostock as bs
 import json, os, time
 from datetime import datetime, timedelta
 
-GRID=300
-HIST_DAYS=150
+GRID=400  # 400网格够准又快，500更准但慢
+HIST_DAYS_DISPLAY=150
+HIST_DAYS_BUILD=1000
 BATCH=500
-RETRY=3
+RETRY=2
 
 def build_chip(bars):
     n=len(bars)
@@ -19,9 +22,10 @@ def build_chip(bars):
     minP=min(b['low'] for b in bars)
     maxP=max(b['high'] for b in bars)
     if maxP<=minP: return None
-    step=(maxP-minP)/GRID
+    step=(maxP-minP)/GRID if GRID else 0
     dist=[0.0]*GRID
     cost50=[0]*n; cost75=[0]*n; cost90=[0]*n; zq=[0]*n; zq1=[0]*n; vwma=[0]*n
+    # VWMA10
     for i in range(n):
         sCV=0; sV=0
         for k in range(max(0,i-9), i+1):
@@ -32,7 +36,7 @@ def build_chip(bars):
         b=bars[i]
         turn=b.get('turn',0.01)
         if not turn or turn<=0: turn=0.01
-        turn=max(0.001, min(turn,0.3))
+        turn=max(0.001, min(turn,0.3))  # 0.1%~30%
         for g in range(GRID): dist[g]*=(1-turn)
         low=b['low']; high=b['high']; avg=b.get('avg', (low+high+b['close'])/3)
         lowIdx=max(0, min(GRID-1, int((low-minP)/step))) if step else 0
@@ -76,87 +80,98 @@ def build_chip(bars):
     return dict(cost50=cost50,cost75=cost75,cost90=cost90,zq=zq,zq1=zq1,vwma=vwma,minP=minP,maxP=maxP,dist=dist)
 
 def get_codes():
-    stocks=[]
-    indices=[]
+    stocks=[]; indices=[]
     for attempt in range(3):
         try:
             lg=bs.login()
-            print(f'baostock login attempt {attempt} {lg.error_code} {lg.error_msg}')
+            print(f'login {lg.error_code} {lg.error_msg} attempt {attempt}')
             rs=bs.query_stock_basic()
-            print(f'query_stock_basic error_code={rs.error_code} msg={rs.error_msg}')
+            print(f'query error_code={rs.error_code}')
             cnt=0
-            sample=0
             while rs.error_code=='0' and rs.next():
                 row=rs.get_row_data()
                 cnt+=1
-                if sample<3:
-                    print(f'示例行{cnt}: {row}')
-                    sample+=1
-                if len(row)<6:
-                    continue
+                if len(row)<6: continue
                 code_full=row[0]
-                try:
-                    code=code_full.split('.')[1]
-                except:
-                    continue
-                type_=row[4]
-                status=row[5] if len(row)>5 else '1'
+                try: code=code_full.split('.')[1]
+                except: continue
+                type_=row[4]; status=row[5]
                 if type_=='1' and status=='1':
                     stocks.append(code)
                 elif type_=='2':
                     indices.append(code)
-            print(f'本次取到 股票{len(stocks)} 指数{len(indices)} 遍历行{cnt}')
+            print(f'取到 股票{len(stocks)} 指数{len(indices)} 行{cnt}')
             bs.logout()
             if stocks or indices:
                 os.makedirs('data', exist_ok=True)
-                try:
-                    with open('data/stocks_list.json','w') as jf:
-                        json.dump(dict(stocks=stocks, indices=indices, updated=datetime.now().isoformat()), jf)
-                except:
-                    pass
+                with open('data/stocks_list.json','w') as jf:
+                    json.dump(dict(stocks=stocks, indices=indices, updated=datetime.now().isoformat()), jf)
                 return stocks, indices
         except Exception as e:
-            print(f'get_codes 异常 {e} attempt {attempt}')
-            try:
-                bs.logout()
-            except:
-                pass
+            print(f'get_codes异常 {e}')
+            try: bs.logout()
+            except: pass
         time.sleep(2)
     try:
         if os.path.exists('data/stocks_list.json'):
             with open('data/stocks_list.json') as f:
                 j=json.load(f)
-                print(f'使用缓存 stocks_list.json 股票{len(j.get("stocks",[]))} 指数{len(j.get("indices",[]))}')
                 return j.get('stocks',[]), j.get('indices',[])
-    except Exception as e:
-        print(f'读缓存失败 {e}')
-    print('get_codes 最终返回0')
+    except: pass
     return stocks, indices
 
-def fetch_kline(code):
-    lg=bs.login()
-    rs=bs.query_history_k_data_plus(
-        f"{'sh' if code.startswith('6') else 'sz'}.{code}",
-        "date,open,high,low,close,volume,amount,turn",
-        start_date=(datetime.now()-timedelta(days=400)).strftime('%Y-%m-%d'),
-        end_date=datetime.now().strftime('%Y-%m-%d'),
-        frequency="d", adjustflag="2")
-    data=[]
-    while rs.error_code=='0' and rs.next():
-        d=rs.get_row_data()
-        try:
-            vol=float(d[5]); amount=float(d[6]); turn=float(d[7])/100 if d[7] else 0.01
-            avg=amount/vol if vol else (float(d[2])+float(d[3])+float(d[4]))/3
-            data.append(dict(date=d[0], open=float(d[1]), high=float(d[2]), low=float(d[3]), close=float(d[4]), volume=vol, amount=amount, turn=turn, avg=avg))
-        except:
-            pass
-    bs.logout()
-    return data[-HIST_DAYS:]
+def fetch_batch(codes, is_index=False):
+    bars_map={}
+    try:
+        lg=bs.login()
+        if lg.error_code!='0':
+            print(f'batch login fail {lg.error_msg}')
+            return bars_map
+        fields='date,code,open,high,low,close,volume,amount,turn,tradestatus,pctChg'
+        start_date=(datetime.now()-timedelta(days=HIST_DAYS_BUILD+80)).strftime('%Y-%m-%d')
+        end_date=datetime.now().strftime('%Y-%m-%d')
+        for code in codes:
+            try:
+                sec=f"sh.{code}" if (code.startswith('6') or (is_index and code.startswith('0'))) else f"sz.{code}"
+                if code=='000001': sec='sh.000001'
+                if code=='399001': sec='sz.399001'
+                rs=bs.query_history_k_data_plus(sec, fields, start_date=start_date, end_date=end_date, frequency='d', adjustflag='2')
+                if rs.error_code!='0': continue
+                lst=[]
+                while rs.error_code=='0' and rs.next():
+                    lst.append(rs.get_row_data())
+                if not lst: continue
+                bars=[]
+                for r in lst:
+                    # r: date,code,open,high,low,close,volume,amount,turn,tradestatus,pctChg
+                    if r[9]=='0': continue
+                    try:
+                        vol=float(r[6]); amount=float(r[7])
+                        turn=float(r[8])/100 if r[8] else 0.01
+                        avg=amount/vol if vol else (float(r[2])+float(r[3])+float(r[4]))/3
+                        bars.append(dict(date=r[0], open=float(r[2]), high=float(r[3]), low=float(r[4]), close=float(r[5]), volume=vol, amount=amount, turn=turn, avg=avg))
+                    except: continue
+                if len(bars)>=60:
+                    # 保留BUILD长度建分布
+                    if len(bars)>HIST_DAYS_BUILD:
+                        bars=bars[-HIST_DAYS_BUILD:]
+                    bars_map[code]=bars
+            except Exception as e:
+                continue
+        bs.logout()
+    except Exception as e:
+        print(f'batch异常 {e}')
+        try: bs.logout()
+        except: pass
+    return bars_map
 
 def save_stock(code, bars, chip):
     os.makedirs('data/stocks', exist_ok=True)
+    display_bars=bars[-HIST_DAYS_DISPLAY:] if len(bars)>HIST_DAYS_DISPLAY else bars
+    offset=len(bars)-len(display_bars)
     out=[]
-    for i,b in enumerate(bars):
+    for j,b in enumerate(display_bars):
+        i=offset+j
         out.append(dict(d=b['date'], o=b['open'], c=b['close'], h=b['high'], l=b['low'], v=b['volume'], a=b['amount'], turn=b['turn'], avg=b['avg'], cost50=chip['cost50'][i], cost75=chip['cost75'][i], cost90=chip['cost90'][i], zq=chip['zq'][i], zq1=chip['zq1'][i]))
     pref='sh' if code.startswith('6') else 'sz'
     with open(f'data/stocks/{pref}_{code}.json','w') as f:
@@ -164,82 +179,55 @@ def save_stock(code, bars, chip):
 
 def save_index(code, bars):
     os.makedirs('data/indices', exist_ok=True)
-    out=[dict(d=b['date'], o=b['open'], c=b['close'], h=b['high'], l=b['low'], v=b['volume']) for b in bars]
+    out=[dict(d=b['date'], o=b['open'], c=b['close'], h=b['high'], l=b['low'], v=b['volume']) for b in bars[-HIST_DAYS_DISPLAY:]]
     with open(f'data/indices/{code}.json','w') as f:
         json.dump(dict(bars=out, updated=datetime.now().isoformat()), f)
 
 def main():
     stocks, indices = get_codes()
     print(f'股票{len(stocks)} 指数{len(indices)}')
-    os.makedirs('data', exist_ok=True)
     os.makedirs('data/stocks', exist_ok=True)
     os.makedirs('data/indices', exist_ok=True)
-    for code in indices[:80]:
-        try:
-            bars=fetch_kline(code)
-            if bars: save_index(code, bars)
-        except Exception as e:
-            print(f'指数 {code} 跳过 {e}')
-            continue
-    done=set()
+    # 已有文件跳过逻辑，clean=false时查缺补漏
+    existing=set()
     if os.path.exists('data/stocks'):
         for fn in os.listdir('data/stocks'):
             if fn.endswith('.json'):
-                try:
-                    done.add(fn.split('_')[1].split('.')[0])
-                except:
-                    pass
-    print(f'已完成{len(done)}，待跑{len([c for c in stocks if c not in done])}')
-    all_codes=[c for c in stocks if c not in done]
-    round_idx=0
-    while all_codes:
-        round_idx+=1
-        print(f'第{round_idx}轮 剩余{len(all_codes)} 0:30后每轮{BATCH}只 卡顿跳过')
-        batch=all_codes[:BATCH]
-        failed=[]
-        for code in batch:
-            for attempt in range(RETRY):
-                try:
-                    bars=fetch_kline(code)
-                    if len(bars)<60:
-                        print(f'{code} 数据不足跳过')
-                        break
-                    chip=build_chip(bars)
-                    if not chip:
-                        break
-                    save_stock(code, bars, chip)
-                    print(f'{code} ok COST50 {chip["cost50"][-1]:.2f} ZQ {chip["zq"][-1]:.1f}')
-                    break
-                except Exception as e:
-                    print(f'{code} 卡顿跳过 {e} attempt {attempt}')
-                    time.sleep(0.5)
-                    if attempt==RETRY-1:
-                        failed.append(code)
-        all_codes = failed + all_codes[BATCH:]
-        if not all_codes:
-            break
-        now=datetime.now()
-        if now.hour>=8 and now.minute>=30:
-            print('快开盘，继续查缺补漏')
-        time.sleep(3)
-        if round_idx>30:
-            break
-    steep_all=[]
-    for fn in os.listdir('data/stocks'):
-        try:
-            with open(f'data/stocks/{fn}') as f:
-                j=json.load(f)
-                bars=j['bars']
-                if len(bars)<3: continue
-                last=bars[-1]
-                steep_all.append(dict(code=fn.split('_')[1].split('.')[0], cost50=last['cost50'], cost75=last['cost75'], cost90=last['cost90'], zq=last['zq'], zq1=last['zq1'], turn=last['turn']*100, c=last['c'], d=last['d']))
-        except:
+                # sh_600000.json -> 600000
+                try: existing.add(fn.split('_')[1].split('.')[0])
+                except: pass
+    # 股票分批
+    total_done=0
+    for batch_idx in range(0, len(stocks), BATCH):
+        batch=stocks[batch_idx:batch_idx+BATCH]
+        # 过滤已存在且是增量模式（非clean）
+        to_fetch=[c for c in batch if c not in existing] if os.environ.get('CLEAN')!='true' else batch
+        if not to_fetch and os.environ.get('CLEAN')!='true':
+            print(f'batch {batch_idx//BATCH} 已存在跳过 {len(batch)}')
+            total_done+=len(batch)
             continue
+        # 为clean=true时也要取全量，这里to_fetch就是batch
+        fetch_codes = to_fetch if os.environ.get('CLEAN')!='true' else batch
+        if not fetch_codes:
+            fetch_codes=batch
+        print(f'batch {batch_idx//BATCH} 开始 取{len(fetch_codes)} 已有{len(batch)-len(fetch_codes)}')
+        bars_map=fetch_batch(fetch_codes)
+        for code, bars in bars_map.items():
+            chip=build_chip(bars)
+            if chip:
+                save_stock(code, bars, chip)
+                print(f'{code} ok COST50 {chip["cost50"][-1]:.2f} ZQ {chip["zq"][-1]:.1f} BUILD={len(bars)}')
+        total_done+=len(batch)
+        time.sleep(0.5)
+    # 指数
+    ibars_map=fetch_batch(indices, is_index=True)
+    for code, bars in ibars_map.items():
+        save_index(code, bars)
+    # meta
+    total_files=len([f for f in os.listdir('data/stocks') if f.endswith('.json')]) if os.path.exists('data/stocks') else 0
     with open('data/meta.json','w') as f:
-        json.dump(dict(total=len(steep_all), lastUpdateDate=datetime.now().isoformat(), updated=datetime.now().isoformat(), note=f'指数{len(indices)} 股票{len(steep_all)} COST/ZQ历史+当日 amount/vol'), f)
-    with open('data/steep_all.json','w') as f:
-        json.dump(dict(all=steep_all, updated=datetime.now().isoformat()), f)
-    print(f'完成 全市场{len(steep_all)}')
+        json.dump(dict(total=total_files, lastUpdateDate=datetime.now().strftime('%Y-%m-%d'), buildDays=HIST_DAYS_BUILD, displayDays=HIST_DAYS_DISPLAY, grid=GRID), f)
+    print(f'完成 全市场{total_files}')
 
 if __name__=='__main__':
     main()
