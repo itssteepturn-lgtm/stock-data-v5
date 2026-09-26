@@ -1,0 +1,18 @@
+{
+  "total": 6,
+  "failed": [
+    "920706"
+  ],
+  "updated": "2026-09-26 14:23:32",
+  "grid": 300,
+  "hist_days": 150,
+  "method": "baostock amount/volume + turn% + triangle + decay + 300grid",
+  "stocks": [
+    "300313",
+    "600519",
+    "600127",
+    "003006",
+    "002909",
+    "688137"
+  ]
+}
