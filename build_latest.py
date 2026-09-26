@@ -68,12 +68,29 @@ def build_chip(bars):
 
 def get_all_codes():
     codes=[]
-    lg=bs.login()
-    rs=bs.query_all_stock(day=datetime.now().strftime('%Y-%m-%d'))
-    while rs.error_code=='0' and rs.next():
-        row=rs.get_row_data()
-        codes.append(row[0].split('.')[1])
-    bs.logout()
+    try:
+        lg=bs.login()
+        print(f"login all_stock: {lg.error_code} {lg.error_msg}")
+        # 今天可能是非交易日，往前找5天
+        for offset in range(0, 7):
+            day = (datetime.now() - timedelta(days=offset)).strftime('%Y-%m-%d')
+            rs=bs.query_all_stock(day=day)
+            print(f"query_all_stock {day}: {rs.error_code} {rs.error_msg}")
+            if rs.error_code=='0':
+                while rs.next():
+                    row=rs.get_row_data()
+                    codes.append(row[0].split('.')[1])
+                if codes:
+                    print(f"get_all_codes from {day} got {len(codes)}")
+                    break
+        bs.logout()
+    except Exception as e:
+        print(f"get_all_codes exception {e}")
+        try: bs.logout()
+        except: pass
+    if not codes:
+        print("get_all_codes 为空，用你给的7只保底调试")
+        codes = ["688137","920706","002909","003086","600127","600519","300313"]
     return sorted(set(codes))
 
 def fetch_one(code):
@@ -103,19 +120,27 @@ def fetch_one(code):
 
 if __name__ == "__main__":
     clean = '--clean' in sys.argv
-    if clean and os.path.exists('data/stocks'):
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    data_dir = os.path.join(base_dir, 'data', 'stocks')
+    if clean and os.path.exists(data_dir):
         import shutil
-        shutil.rmtree('data/stocks')
-    os.makedirs('data/stocks', exist_ok=True)
+        print(f"clean 删除 {data_dir}")
+        shutil.rmtree(data_dir)
+    os.makedirs(data_dir, exist_ok=True)
+    print(f"data目录 {data_dir} 已创建 exists={os.path.exists(data_dir)}")
     codes = get_all_codes()
-    print(f"Total {len(codes)}")
+    print(f"Total {len(codes)} -> {codes[:20]}")
     cnt=0
     for code in codes:
         try:
             bars=fetch_one(code)
-            if len(bars)<60: continue
+            if len(bars)<60:
+                print(f"{code} skip bars {len(bars)}")
+                continue
             chip=build_chip(bars)
-            if not chip: continue
+            if not chip:
+                print(f"{code} chip None")
+                continue
             display=bars[-HIST_DISPLAY:]
             offset=len(bars)-len(display)
             out=[]
@@ -123,12 +148,16 @@ if __name__ == "__main__":
                 i=offset+j
                 out.append(dict(d=b['date'], o=b['open'], c=b['close'], h=b['high'], l=b['low'], v=b['volume'], a=b['amount'], turn=b['turn'], avg=b['avg'], cost50=chip['cost50'][i], cost75=chip['cost75'][i], cost90=chip['cost90'][i], zq=chip['zq'][i], zq1=chip['zq1'][i], vwma=chip['vwma'][i]))
             pref='sh' if (code.startswith('6') or code.startswith('9') or code.startswith('688')) else 'sz'
-            with open(f'data/stocks/{pref}_{code}.json','w') as f:
+            out_path = os.path.join(data_dir, f'{pref}_{code}.json')
+            with open(out_path,'w') as f:
                 json.dump(dict(bars=out, dist=chip['dist'], minP=chip['minP'], maxP=chip['maxP'], updated=datetime.now().isoformat(), buildDays=len(bars)), f)
             cnt+=1
+            print(f"{cnt} {code} OK COST50 {out[-1]['cost50']:.2f} COST75 {out[-1]['cost75']:.2f} ZQ {out[-1]['zq']:.1f} 文件 {out_path}")
             if cnt%100==0:
                 print(f"{cnt} {code} COST50 {out[-1]['cost50']:.2f}")
         except Exception as e:
+            import traceback
             print(f"{code} error {e}")
+            traceback.print_exc()
             continue
-    print(f"DONE {cnt}")
+    print(f"DONE {cnt} 文件夹 {data_dir} 文件数 {len(os.listdir(data_dir)) if os.path.exists(data_dir) else 0}")
