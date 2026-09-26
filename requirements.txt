@@ -1,2 +1,1 @@
-baostock
-pandas
+requests
