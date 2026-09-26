@@ -1,52 +1,178 @@
-name: V5全功能版 - COST/ZQ历史+当日 全市场
+
+name: Build V5 Full - COST/ZQ每时每刻 高...
+
 on:
-  schedule:
-    - cron: '30 16 * * *'  # 0:30 北京
-    - cron: '0 17 * * *'   # 1:00
-    - cron: '30 17 * * *'  # 1:30
-    - cron: '0 18 * * *'
-    - cron: '30 18 * * *'
-    - cron: '0 19 * * *'
-    - cron: '30 19 * * *'
-    - cron: '0 20 * * *'
-    - cron: '30 20 * * *'
-    - cron: '30 0 * * *'   # 8:30
-    - cron: '30 1 * * *'   # 9:30
   workflow_dispatch:
     inputs:
       clean:
-        description: '是否清空data全新跑'
+        description: '是否清空data重建 true/false'
         required: false
-        default: 'false'
-
-# 关键：防止你说的0:30自动跑和现在手动跑重复，导致全乱
-concurrency:
-  group: v5-build
-  cancel-in-progress: false  # 不取消，排队等现在的跑完再跑
+        default: 'true'
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
       - name: Install deps
-        run: pip install baostock pandas
-      - name: Clean data if requested
-        if: ${{ github.event.inputs.clean == 'true' }}
-        run: rm -rf data
-      - name: Ensure dirs
-        run: mkdir -p data/stocks data/indices
-      - name: Build V5 Full - COST/ZQ每时每刻 高效版 带并发锁
-        run: python build_latest.py
+        run: pip install baostock numpy
+      - name: Build V5 Full - COST/ZQ每时每刻
+        run: |
+          python - << 'PY'
+          import baostock as bs
+          import json, os, sys, time, random
+          from datetime import datetime, timedelta
+          import numpy as np
+          GRID=400
+          HIST_BUILD=150
+          HIST_DISPLAY=150
+          BATCH_COMMIT=500
+          def build_chip(bars):
+              n=len(bars)
+              if n<60: return None
+              lows=np.array([b['low'] for b in bars])
+              highs=np.array([b['high'] for b in bars])
+              closes=np.array([b['close'] for b in bars])
+              avgs=np.array([b['avg'] for b in bars])
+              turns=np.array([b['turn'] for b in bars])
+              vols=np.array([b['volume'] for b in bars])
+              minP=float(np.min(lows)); maxP=float(np.max(highs))
+              if maxP<=minP: return None
+              step=(maxP-minP)/GRID
+              dist=np.zeros(GRID)
+              cost50=np.zeros(n); cost75=np.zeros(n); cost90=np.zeros(n)
+              zq=np.zeros(n); zq1=np.zeros(n); vwma=np.zeros(n)
+              price_grid = minP + np.arange(GRID)*step
+              for i in range(n):
+                  s=max(0,i-9)
+                  cv=np.sum(closes[s:i+1]*vols[s:i+1]); sv=np.sum(vols[s:i+1])
+                  vwma[i]=cv/sv if sv else closes[i]
+              for i in range(n):
+                  turn=float(turns[i])
+                  if not turn: turn=0.001
+                  turn=max(0.0001, min(turn,0.3))
+                  dist*=(1-turn)
+                  low=lows[i]; high=highs[i]; avg=avgs[i]
+                  lowIdx=int((low-minP)/step); highIdx=int((high-minP)/step); avgIdx=int((avg-minP)/step)
+                  lowIdx=max(0,min(GRID-1,lowIdx)); highIdx=max(0,min(GRID-1,highIdx)); avgIdx=max(lowIdx,min(highIdx,avgIdx))
+                  if lowIdx>highIdx: lowIdx,highIdx=highIdx,lowIdx
+                  size=highIdx-lowIdx+1
+                  if size<=0: continue
+                  weights=np.zeros(size)
+                  dl=avgIdx-lowIdx; dr=highIdx-avgIdx
+                  for j in range(size):
+                      g=lowIdx+j
+                      if g<=avgIdx:
+                          w=1.0 if dl==0 and g==avgIdx else (g-lowIdx)/dl if dl else 0
+                      else:
+                          w=1.0 if dr==0 and g==avgIdx else (highIdx-g)/dr if dr else 0
+                      weights[j]=max(0,w)
+                  if np.all(weights==0): weights[:]=1.0
+                  sW=np.sum(weights)
+                  if sW>0: dist[lowIdx:highIdx+1]+=weights/sW*turn
+                  total=np.sum(dist)
+                  if total<=0:
+                      cost50[i]=closes[i]; cost75[i]=closes[i]; cost90[i]=closes[i]
+                      continue
+                  cumsum=np.cumsum(dist); ratio=cumsum/total
+                  cost50[i]=price_grid[np.searchsorted(ratio,0.5)] if np.searchsorted(ratio,0.5)<GRID else closes[i]
+                  cost75[i]=price_grid[np.searchsorted(ratio,0.75)] if np.searchsorted(ratio,0.75)<GRID else closes[i]
+                  cost90[i]=price_grid[np.searchsorted(ratio,0.9)] if np.searchsorted(ratio,0.9)<GRID else closes[i]
+                  idx_c=int((closes[i]-minP)/step); idx_a=int((avgs[i]-minP)/step)
+                  idx_c=max(0,min(GRID-1,idx_c)); idx_a=max(0,min(GRID-1,idx_a))
+                  zq[i]=np.sum(dist[:idx_c+1])/total*100
+                  zq1[i]=np.sum(dist[:idx_a+1])/total*100
+              return dict(cost50=cost50.tolist(), cost75=cost75.tolist(), cost90=cost90.tolist(), zq=zq.tolist(), zq1=zq1.tolist(), vwma=vwma.tolist(), minP=minP, maxP=maxP, dist=dist.tolist())
+
+          def get_all_codes():
+              codes=[]
+              lg=bs.login()
+              rs=bs.query_all_stock(day=datetime.now().strftime('%Y-%m-%d'))
+              while rs.error_code=='0' and rs.next():
+                  row=rs.get_row_data()
+                  # row[0] sh.600000
+                  code=row[0].split('.')[1]
+                  codes.append(code)
+              bs.logout()
+              # 去重
+              codes=sorted(set(codes))
+              return codes
+
+          def fetch_one(code):
+              bars=[]
+              lg=bs.login()
+              if lg.error_code!='0': return []
+              fields='date,code,open,high,low,close,volume,amount,turn,tradestatus,pctChg'
+              start_date=(datetime.now()-timedelta(days=HIST_BUILD+120)).strftime('%Y-%m-%d')
+              end_date=datetime.now().strftime('%Y-%m-%d')
+              sec=f"sh.{code}" if (code.startswith('6') or code.startswith('9') or code.startswith('688')) else f"sz.{code}"
+              if code=='000001': sec='sh.000001'
+              rs=bs.query_history_k_data_plus(sec, fields, start_date=start_date, end_date=end_date, frequency='d', adjustflag='2')
+              lst=[]
+              if rs.error_code=='0':
+                  while rs.error_code=='0' and rs.next():
+                      lst.append(rs.get_row_data())
+              for r in lst:
+                  if r[9]=='0': continue
+                  try:
+                      vol=float(r[6]); amount=float(r[7]); turn=float(r[8])/100 if r[8] else 0.001
+                      avg=amount/vol if vol else float(r[5])
+                      bars.append(dict(date=r[0], open=float(r[2]), high=float(r[3]), low=float(r[4]), close=float(r[5]), volume=vol, amount=amount, turn=turn, avg=avg))
+                  except: continue
+              bs.logout()
+              if len(bars)>HIST_BUILD: bars=bars[-HIST_BUILD:]
+              return bars
+
+          clean = os.environ.get('CLEAN','true') == 'true'
+          if clean and os.path.exists('data/stocks'):
+              import shutil
+              shutil.rmtree('data/stocks')
+          os.makedirs('data/stocks', exist_ok=True)
+          codes = get_all_codes()
+          print(f"Total codes {len(codes)}")
+          cnt=0
+          for code in codes:
+              try:
+                  bars=fetch_one(code)
+                  if len(bars)<60:
+                      print(f"{code} skip {len(bars)}")
+                      continue
+                  chip=build_chip(bars)
+                  if not chip:
+                      print(f"{code} chip fail")
+                      continue
+                  display=bars[-HIST_DISPLAY:]
+                  offset=len(bars)-len(display)
+                  out=[]
+                  for j,b in enumerate(display):
+                      i=offset+j
+                      out.append(dict(d=b['date'], o=b['open'], c=b['close'], h=b['high'], l=b['low'], v=b['volume'], a=b['amount'], turn=b['turn'], avg=b['avg'], cost50=chip['cost50'][i], cost75=chip['cost75'][i], cost90=chip['cost90'][i], zq=chip['zq'][i], zq1=chip['zq1'][i], vwma=chip['vwma'][i]))
+                  pref='sh' if (code.startswith('6') or code.startswith('9') or code.startswith('688')) else 'sz'
+                  with open(f'data/stocks/{pref}_{code}.json','w') as f:
+                      json.dump(dict(bars=out, dist=chip['dist'], minP=chip['minP'], maxP=chip['maxP'], updated=datetime.now().isoformat(), buildDays=len(bars)), f)
+                  cnt+=1
+                  if cnt%10==0:
+                      print(f"{cnt} {code} COST50 {out[-1]['cost50']:.2f} ZQ {out[-1]['zq']:.1f} BUILD={len(bars)}")
+                  if cnt%BATCH_COMMIT==0:
+                      os.system('git config --global user.name "github-actions"')
+                      os.system('git config --global user.email "github-actions@github.com"')
+                      os.system('git add data/stocks')
+                      os.system(f'git commit -m "checkpoint {cnt}" || echo no changes')
+                      os.system('git push || echo push fail')
+              except Exception as e:
+                  print(f"{code} error {e}")
+                  continue
+          print(f"DONE total {cnt}")
+          PY
+        env:
+          CLEAN: ${{ inputs.clean }}
       - name: Commit data
         run: |
-          git config --global user.name "bot"
-          git config --global user.email "bot@bot.com"
-          git add data/
-          git diff --staged --quiet || git commit -m "V5全 COST/ZQ历史+当日 $(date) BATCH=500 并发锁"
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+          git add data/stocks
+          git commit -m "Build V5 Full final 150天对标东财" || echo "no changes"
           git push
