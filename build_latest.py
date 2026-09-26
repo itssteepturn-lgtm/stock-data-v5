@@ -218,6 +218,17 @@ def main():
                 save_stock(code, bars, chip)
                 print(f'{code} ok COST50 {chip["cost50"][-1]:.2f} ZQ {chip["zq"][-1]:.1f} BUILD={len(bars)}')
         total_done+=len(batch)
+        # 断点续传：每批结束就提交，已有进度落盘，撞6小时下次clean=false从这里续
+        try:
+            import subprocess
+            subprocess.run(['git','config','--global','user.name','github-actions'], check=False)
+            subprocess.run(['git','config','--global','user.email','github-actions@github.com'], check=False)
+            subprocess.run(['git','add','data/stocks','data/indices','data/meta.json'], check=False)
+            subprocess.run(['git','commit','-m',f'checkpoint {total_done} true-cost BUILD720'], check=False)
+            subprocess.run(['git','push'], check=False)
+            print(f'checkpoint已提交 {total_done}')
+        except Exception as e:
+            print(f'checkpoint提交失败 {e}')
         time.sleep(0.5)
     # 指数
     ibars_map=fetch_batch(indices, is_index=True)
