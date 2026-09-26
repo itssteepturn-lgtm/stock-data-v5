@@ -2,7 +2,6 @@ name: V5全功能版
 
 on:
   schedule:
-    # 北京 0:30,1:30,2:30,3:30,4:30,5:30,6:30,7:30,8:30,9:30 = UTC 16:30-01:30
     - cron: '30 16 * * *'
     - cron: '30 17 * * *'
     - cron: '30 18 * * *'
@@ -20,7 +19,7 @@ on:
         required: false
         default: 'false'
       stock_codes:
-        description: '指定代码逗号分隔，留空跑默认列表'
+        description: '指定代码逗号分隔，留空跑默认7只'
         required: false
         default: ''
 
@@ -33,7 +32,7 @@ jobs:
         with:
           python-version: '3.10'
       - name: Install deps
-        run: pip install -r requirements.txt
+        run: pip install requests
       - name: Build
         env:
           CLEAN: ${{ inputs.clean }}
