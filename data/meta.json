@@ -9,7 +9,7 @@
     "920706",
     "688137"
   ],
-  "updated": "2026-10-11 06:18:10",
+  "updated": "2026-10-11 07:27:38",
   "grid": 300,
   "hist_days": 150,
   "method": "eastmoney pure f56*100 f57 f61 triangle decay 300",
